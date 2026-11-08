@@ -318,6 +318,7 @@ function audioCtx(){if(!ac)ac=new (window.AudioContext||window.webkitAudioContex
 function loadSounds(){try{const a=audioCtx();for(const [k,f] of Object.entries(SND))fetch('../assets/audio/'+f).then(r=>r.arrayBuffer()).then(b=>a.decodeAudioData(b)).then(buf=>{sounds[k]=buf;soundsLoaded++}).catch(()=>{})}catch(e){/* no audio */}}
 function play(name,vol=1,rate=1){const buf=sounds[name];if(!buf)return false;try{const a=audioCtx(),s=a.createBufferSource(),g=a.createGain();s.buffer=buf;s.playbackRate.value=rate;g.gain.value=vol;s.connect(g).connect(a.destination);s.start();return true}catch(e){return false}}
 function voice(name,text){if(!play(name,1.3))say(text)}
+loadSounds(); // decode right away (needs no gesture), so the first shot/event already uses the samples
 function boom(){if(play('fire',.9,.9+Math.random()*.2))return;boomSynth()}
 function boomSynth(){try{
   if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();if(ac.state==='suspended')ac.resume();
@@ -368,8 +369,8 @@ const MANUAL_HOLD=8,SPEED_MAX=3.6,SPEED_REV=-1.3,TURN=.95,HULL=2.3;
 const modeEl=document.getElementById('mode');
 addEventListener('keydown',e=>{const k=e.key.toLowerCase();if(k.length===1&&'wasd'.includes(k)){keys.add(k);lastInput=tNow;e.preventDefault()}
   else if(k===' '){e.preventDefault();if(!e.repeat)fireOne(tNow)}
-  if(!soundsStarted){soundsStarted=true;loadSounds()}}); // first key press = user gesture: audio may start, samples get decoded
-let soundsStarted=false;
+  audioCtx()}); // any key press is a user gesture: lets the (already decoded) samples play
+for(const ev of ['pointerdown','touchstart'])addEventListener(ev,()=>{try{audioCtx()}catch(e){/* no audio */}});
 addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
 addEventListener('blur',()=>keys.clear());
 const isManual=t=>t-lastInput<MANUAL_HOLD;
