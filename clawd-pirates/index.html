@@ -1,6 +1,6 @@
-<!doctype html><meta charset=utf-8><title>Clawd</title>
+<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"><title>Clawd</title>
 <style>
-html,body{margin:0;height:100%;overflow:hidden;background:#8fd0f0;font-family:sans-serif}
+html,body{margin:0;height:100%;overflow:hidden;background:#8fd0f0;font-family:sans-serif;touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
 canvas{position:absolute;inset:0;display:block}
 #cl{position:absolute;left:0;top:0;pointer-events:none;will-change:transform}
 #jb{position:absolute;left:0;top:0;background:#fff;color:#1b1b1b;font:bold 28px/1.25 sans-serif;padding:16px 24px;border-radius:28px;width:620px;box-sizing:border-box;text-align:center;box-shadow:0 6px 0 #0003;pointer-events:none;will-change:transform;transition:background .3s}
@@ -13,11 +13,26 @@ canvas{position:absolute;inset:0;display:block}
 #ban{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(0);font:bold 64px sans-serif;color:#fff;text-shadow:0 4px 12px #000c,0 0 30px #ffb020;pointer-events:none;transition:transform .35s cubic-bezier(.2,1.6,.4,1)}
 #ban.on{transform:translate(-50%,-50%) scale(1)}
 #err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#fff;background:#123;font-size:40px}
+/* touch controls (phone / tablet): shown when the pointer is coarse or on the first touch */
+#touch{position:absolute;inset:0;pointer-events:none;display:none}
+body.touch #touch{display:block}
+#stick{position:absolute;left:max(22px,env(safe-area-inset-left));bottom:max(22px,env(safe-area-inset-bottom));width:150px;height:150px;border-radius:50%;background:#0005;border:3px solid #ffe08a99;pointer-events:auto;touch-action:none}
+#knob{position:absolute;left:50%;top:50%;width:66px;height:66px;margin:-33px 0 0 -33px;border-radius:50%;background:#ffe08ad0;box-shadow:0 4px 0 #0004;will-change:transform}
+#fire{position:absolute;right:max(22px,env(safe-area-inset-right));bottom:max(22px,env(safe-area-inset-bottom));width:118px;height:118px;border-radius:50%;background:#c0392bd0;border:4px solid #ffe08a;color:#fff;font:bold 22px sans-serif;display:flex;align-items:center;justify-content:center;pointer-events:auto;touch-action:none;box-shadow:0 6px 0 #0005;letter-spacing:1px}
+#fire.down{transform:translateY(4px);box-shadow:0 2px 0 #0005;background:#e74c3c}
+body.touch #hud{top:max(10px,env(safe-area-inset-top));bottom:auto;right:max(12px,env(safe-area-inset-right));gap:8px}
+body.touch .pill{font-size:16px;padding:5px 11px;gap:6px}
+body.touch .coin{width:16px;height:16px}
+body.touch #jb{font-size:20px;padding:10px 16px;border-radius:20px}
+body.touch #ban{font-size:44px}
+@media (max-height:420px){#stick{width:110px;height:110px}#knob{width:50px;height:50px;margin:-25px 0 0 -25px}#fire{width:88px;height:88px;font-size:17px}}
+@media (max-width:600px){#stick{width:120px;height:120px}#knob{width:54px;height:54px;margin:-27px 0 0 -27px}#fire{width:96px;height:96px;font-size:18px}body.touch .pill{font-size:13px;padding:4px 9px}body.touch #jb{font-size:16px}}
 </style>
 <div id=hud><div class=pill id=mode>Autopilot</div><div class=pill id=ammo>Kugeln: ●●●</div><div class=pill><span class=coin></span><span id=score>Schätze: 0</span></div><div class=pill id=clock>Tag</div></div>
 <img id=cl src="../assets/clawd-pirate.svg" alt="">
 <div id=jb></div>
 <div id=ban></div>
+<div id=touch><div id=stick><div id=knob></div></div><div id=fire>FEUER</div></div>
 <div id=err>WebGL nicht verfügbar</div>
 <script type=module>
 import * as THREE from '../assets/three.module.js';
@@ -27,9 +42,9 @@ const W=()=>innerWidth,H=()=>innerHeight;
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setPixelRatio(1);renderer.setSize(W(),H());document.body.prepend(renderer.domElement);
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x8fd0f0);
-const VIEW=18;
+const VIEW0=18;let VIEW=VIEW0; // visible height in world units; portrait screens widen it so at least 20 units fit across
 const cam=new THREE.OrthographicCamera(-1,1,1,-1,-200,400);
-function fit(){const a=W()/H();cam.left=-VIEW*a/2;cam.right=VIEW*a/2;cam.top=VIEW/2;cam.bottom=-VIEW/2;cam.updateProjectionMatrix();renderer.setSize(W(),H())}
+function fit(){const a=W()/H();VIEW=Math.max(VIEW0,20/a);cam.left=-VIEW*a/2;cam.right=VIEW*a/2;cam.top=VIEW/2;cam.bottom=-VIEW/2;cam.updateProjectionMatrix();renderer.setSize(W(),H())}
 fit();addEventListener('resize',fit);
 const CAMOFF=new THREE.Vector3(40,40,40);
 const hemi=new THREE.HemisphereLight(0xffffff,0x5a8aaa,1.0);scene.add(hemi);
@@ -319,6 +334,39 @@ function loadSounds(){try{const a=audioCtx();for(const [k,f] of Object.entries(S
 function play(name,vol=1,rate=1){const buf=sounds[name];if(!buf)return false;try{const a=audioCtx(),s=a.createBufferSource(),g=a.createGain();s.buffer=buf;s.playbackRate.value=rate;g.gain.value=vol;s.connect(g).connect(a.destination);s.start();return true}catch(e){return false}}
 function voice(name,text){if(!play(name,1.3))say(text)}
 loadSounds(); // decode right away (needs no gesture), so the first shot/event already uses the samples
+
+// ============ ambient: quiet sea bed (filtered noise with slow swells), a soft pad, gull cries now and then — all synthesized, no files.
+// Starts as soon as the AudioContext is running (first gesture). Volume: ?amb=0.3 (default .16, 0 = off).
+const AMB_VOL=(()=>{const v=new URLSearchParams(location.search).get('amb');return v===null?.16:clamp(+v||0,0,1)})();
+let amb=null,dayLevel=1;
+const CHORDS=[[110,164.8,220,261.6],[98,146.8,196,246.9],[87.3,130.8,174.6,220],[82.4,123.5,164.8,196],[110,164.8,220,261.6],[130.8,196,261.6,329.6]]; // Am G F E Am C
+function startAmbient(){if(amb||!AMB_VOL)return;try{const a=audioCtx();const master=a.createGain();master.gain.value=0;master.connect(a.destination);
+  // waves: brown noise, low-passed, two slow LFOs on level and filter so the sea breathes
+  const len=a.sampleRate*5|0,buf=a.createBuffer(1,len,a.sampleRate),d=buf.getChannelData(0);let last=0;for(let i=0;i<len;i++){last=(last+.02*(Math.random()*2-1))/1.02;d[i]=last*3.5}
+  for(let i=0;i<2000;i++){const f=i/2000;d[i]*=f;d[len-1-i]*=f} // seamless loop
+  const n=a.createBufferSource();n.buffer=buf;n.loop=true;const lp=a.createBiquadFilter();lp.type='lowpass';lp.frequency.value=520;lp.Q.value=.4;
+  const wg=a.createGain();wg.gain.value=.55;n.connect(lp).connect(wg).connect(master);n.start();
+  const lfo=a.createOscillator(),lg=a.createGain();lfo.frequency.value=.07;lg.gain.value=.3;lfo.connect(lg).connect(wg.gain);lfo.start();
+  const lfo2=a.createOscillator(),lg2=a.createGain();lfo2.frequency.value=.11;lg2.gain.value=220;lfo2.connect(lg2).connect(lp.frequency);lfo2.start();
+  // pad: four soft voices, chords glide every ~14 s
+  const padG=a.createGain();padG.gain.value=.09;padG.connect(master);const voices=[];
+  for(let i=0;i<4;i++){const o=a.createOscillator(),g=a.createGain();o.type=i<2?'triangle':'sine';o.detune.value=(i%2?1:-1)*4;g.gain.value=0;o.connect(g).connect(padG);o.start();voices.push({o,g})}
+  const gullOut=a.createGain();gullOut.gain.value=3;gullOut.connect(master);
+  amb={a,master,voices,gullOut,chord:0,nextChord:0,nextGull:a.currentTime+rnd(4,9)};
+  master.gain.setTargetAtTime(AMB_VOL,a.currentTime,4);
+}catch(e){/* no audio */}}
+function gullCry(t0,f0,out){const a=amb.a,o=a.createOscillator(),g=a.createGain(),bp=a.createBiquadFilter();o.type='sawtooth';bp.type='bandpass';bp.frequency.value=f0*1.4;bp.Q.value=2.5;
+  o.frequency.setValueAtTime(f0*.75,t0);o.frequency.exponentialRampToValueAtTime(f0*1.45,t0+.1);o.frequency.setValueAtTime(f0*1.45,t0+.2);o.frequency.exponentialRampToValueAtTime(f0*.65,t0+.5);
+  const vib=a.createOscillator(),vg=a.createGain();vib.frequency.value=30;vg.gain.value=f0*.035;vib.connect(vg).connect(o.frequency);
+  g.gain.setValueAtTime(.0001,t0);g.gain.exponentialRampToValueAtTime(.6,t0+.05);g.gain.setValueAtTime(.6,t0+.28);g.gain.exponentialRampToValueAtTime(.0001,t0+.52);
+  o.connect(bp).connect(g).connect(out);o.start(t0);vib.start(t0);o.stop(t0+.55);vib.stop(t0+.55)}
+function gullCries(){const a=amb.a;let out=amb.gullOut;if(a.createStereoPanner){const p=a.createStereoPanner();p.pan.value=rnd(-.8,.8);p.connect(amb.gullOut);out=p}
+  const vol=a.createGain();vol.gain.value=rnd(.35,.8);vol.connect(out);const n=1+(Math.random()*3|0),f0=rnd(1100,1500);let t0=a.currentTime+.05;
+  for(let i=0;i<n;i++){gullCry(t0,f0*rnd(.92,1.08),vol);t0+=rnd(.4,.7)}}
+function updateAmbient(){if(!AMB_VOL)return;if(!amb){if(ac&&ac.state==='running')startAmbient();return}
+  const a=amb.a,now=a.currentTime;
+  if(now>=amb.nextChord){const ch=CHORDS[amb.chord++%CHORDS.length];amb.voices.forEach((v,i)=>{v.o.frequency.setTargetAtTime(ch[i],now,1.5);v.g.gain.setTargetAtTime(i<2?.3:.22,now,2)});amb.nextChord=now+rnd(11,17)}
+  if(now>=amb.nextGull){if(dayLevel>.25&&a.state==='running')gullCries();amb.nextGull=now+(dayLevel>.25?rnd(7,18):rnd(20,40))}}
 function boom(){if(play('fire',.9,.9+Math.random()*.2))return;boomSynth()}
 function boomSynth(){try{
   if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();if(ac.state==='suspended')ac.resume();
@@ -371,6 +419,22 @@ addEventListener('keydown',e=>{const k=e.key.toLowerCase();if(k.length===1&&'was
   else if(k===' '){e.preventDefault();if(!e.repeat)fireOne(tNow)}
   audioCtx()}); // any key press is a user gesture: lets the (already decoded) samples play
 for(const ev of ['pointerdown','touchstart'])addEventListener(ev,()=>{try{audioCtx()}catch(e){/* no audio */}});
+// --- touch: virtual stick (left) steers like W/S/A/D but analog, big button (right) fires. Shown on coarse pointers or the first touch.
+const stick={on:false,x:0,y:0,id:-1};let touchUI=false;
+function showTouch(){if(touchUI)return;touchUI=true;document.body.classList.add('touch');fit()}
+if(matchMedia('(pointer:coarse)').matches||new URLSearchParams(location.search).has('touch'))showTouch();
+addEventListener('touchstart',showTouch,{passive:true,once:true});
+{const el=document.getElementById('stick'),knob=document.getElementById('knob'),fire=document.getElementById('fire');
+  const R=()=>el.clientWidth/2,DEAD=.18;
+  const setStick=(e)=>{const r=el.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;let dx=(e.clientX-cx)/(R()*.8),dy=(e.clientY-cy)/(R()*.8);const l=Math.hypot(dx,dy);if(l>1){dx/=l;dy/=l}
+    const dz=v=>Math.abs(v)<DEAD?0:Math.sign(v)*(Math.abs(v)-DEAD)/(1-DEAD);stick.x=dz(dx);stick.y=-dz(dy);knob.style.transform=`translate(${dx*R()*.8}px,${dy*R()*.8}px)`};
+  el.addEventListener('pointerdown',e=>{e.preventDefault();stick.on=true;stick.id=e.pointerId;el.setPointerCapture(e.pointerId);setStick(e);lastInput=tNow});
+  el.addEventListener('pointermove',e=>{if(stick.on&&e.pointerId===stick.id)setStick(e)});
+  const release=e=>{if(e.pointerId!==stick.id)return;stick.on=false;stick.x=stick.y=0;knob.style.transform='';};
+  el.addEventListener('pointerup',release);el.addEventListener('pointercancel',release);el.addEventListener('lostpointercapture',release);
+  fire.addEventListener('pointerdown',e=>{e.preventDefault();fire.classList.add('down');fireOne(tNow)});
+  for(const ev of ['pointerup','pointercancel','pointerleave'])fire.addEventListener(ev,()=>fire.classList.remove('down'));
+  document.getElementById('touch').addEventListener('contextmenu',e=>e.preventDefault());}
 addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
 addEventListener('blur',()=>keys.clear());
 const isManual=t=>t-lastInput<MANUAL_HOLD;
@@ -386,8 +450,8 @@ function steer(t,dt){
     turnRate=step/dt;h=norm(h+step);speed=lerp(speed,1.4,dt*2);return;
   }
   if(isManual(t)){
-    const turn=(keys.has('d')?1:0)-(keys.has('a')?1:0);
-    const want=keys.has('w')?SPEED_MAX:keys.has('s')?SPEED_REV:0;
+    const turn=stick.on?stick.x:(keys.has('d')?1:0)-(keys.has('a')?1:0);
+    const want=stick.on?(stick.y>=0?stick.y*SPEED_MAX:-stick.y*SPEED_REV):keys.has('w')?SPEED_MAX:keys.has('s')?SPEED_REV:0;
     speed=lerp(speed,want,dt*(want?1.1:.7));
     const grip=clamp(Math.abs(speed)/2.2,.3,1); // a boat barely turns while standing still
     const step=(turn*TURN*grip+avoid*.55)*dt; // islands still nudge the helm a little
@@ -413,7 +477,7 @@ function collide(t){
     }
   }
 }
-window.dbg={pos,get h(){return h},get speed(){return speed},get bumps(){return bumps},get shots(){return shots},get audio(){return ac?ac.state:'none'},get t(){return tNow},get reactUntil(){return reactUntil},get jokes(){return m.length},get sounds(){return Object.keys(sounds)},get manual(){return isManual(tNow)},get islands(){return islands.map(i=>({x:i.position.x,z:i.position.z,r:i.userData.r}))}};
+window.dbg={pos,get h(){return h},get speed(){return speed},get bumps(){return bumps},get shots(){return shots},get audio(){return ac?ac.state:'none'},get amb(){return amb?'on':'off'},get stick(){return {...stick}},get t(){return tNow},get reactUntil(){return reactUntil},get jokes(){return m.length},get sounds(){return Object.keys(sounds)},get manual(){return isManual(tNow)},get islands(){return islands.map(i=>({x:i.position.x,z:i.position.z,r:i.userData.r}))}};
 
 // ============ Clawd on deck
 const clEl=document.getElementById('cl'),jb=document.getElementById('jb');
@@ -554,7 +618,7 @@ function placeClawd(){
 const clockEl=document.getElementById('clock');const DAY=300;
 const colDay={sky:C(0x8fd0f0),deep:C(0x2a8ac0),shallow:C(0x4fb6e4)},colNight={sky:C(0x24406a),deep:C(0x1a5a88),shallow:C(0x2a7aa8)},colDusk={sky:C(0xff9a5c),deep:C(0x4a6a8a),shallow:C(0xe09a6a)};
 const tmp=new THREE.Color();
-function updateDay(t){const ph=(t/DAY+.12)%1,el=Math.sin(ph*2*Math.PI),day=clamp((el+.2)/.5,0,1),dusk=Math.exp(-((el/.22)**2))*.8;
+function updateDay(t){const ph=(t/DAY+.12)%1,el=Math.sin(ph*2*Math.PI),day=clamp((el+.2)/.5,0,1),dusk=Math.exp(-((el/.22)**2))*.8;dayLevel=day;
   const mixc=(k)=>tmp.copy(colNight[k]).lerp(colDay[k],day).lerp(colDusk[k],dusk);
   scene.background.copy(mixc('sky'));seaUni.cDeep.value.copy(mixc('deep'));seaUni.cShallow.value.copy(mixc('shallow'));
   seaUni.sunCol.value.set(1,1,1).lerp(C(0xffb070),dusk);seaUni.sunI.value=lerp(.2,.55,day);seaUni.amb.value=lerp(.55,.62,day);
@@ -573,8 +637,9 @@ function scheduler(t){if(t>nextEvent){if(forceEv){forceEv(pos,h);forceEv=null}el
 const clock=new THREE.Clock();let t=T0;const camPos=new THREE.Vector3();
 function frame(){
   const dt=Math.min(clock.getDelta(),.1);t+=dt;tNow=t;
+  if(stick.on)lastInput=t;
   steer(t,dt);pos.x+=Math.sin(h)*speed*dt;pos.z-=Math.cos(h)*speed*dt;collide(t);
-  modeEl.textContent=t<bumpUntil?'Ausweichen!':isManual(t)?(keys.size?'Steuer: '+[...keys].join(' ').toUpperCase():'Steuer: W A S D'):'Autopilot';
+  modeEl.textContent=t<bumpUntil?'Ausweichen!':isManual(t)?(keys.size?'Steuer: '+[...keys].join(' ').toUpperCase():touchUI?'Steuer':'Steuer: W A S D'):'Autopilot';
   for(let i=islands.length-1;i>=0;i--){const g=islands[i];if(Math.hypot(g.position.x-pos.x,g.position.z-pos.z)>90){if(g===lighthouse)lighthouse=null;disposeGroup(g);islands.splice(i,1)}}
   while(islands.length<11)spawnIsland(pos,h,false);
   // buoyancy
@@ -591,7 +656,7 @@ function frame(){
   cannonCd-=dt;if(cannonCd<0){for(const g of islands){if(g.userData.kind!=='rock')continue;const dx=g.position.x-pos.x,dz=g.position.z-pos.z,d=Math.hypot(dx,dz);if(d>7&&d<13){const b=norm(Math.atan2(dx,-dz)-h);if(Math.abs(Math.abs(b)-Math.PI/2)<.5){fireCannon(b>0?1:-1,1,g.position,false);cannonCd=28;break}}}}
   updateClouds(pos,dt);updateGulls(pos,t,dt);updateActors(dt,t);updateChests(pos,dt,t);updateFx(dt);scheduler(t);updateDay(t);
   if(banT>0){banT-=dt;if(banT<=0)banEl.classList.remove('on')}
-  updateAmmo(t);updateJokes(t);
+  updateAmmo(t);updateJokes(t);updateAmbient();
   camPos.set(pos.x,0,pos.z).add(CAMOFF);cam.position.lerp(camPos,Math.min(1,dt*3));
   if(cam.position.distanceToSquared(camPos)>900)cam.position.copy(camPos);
   cam.lookAt(cam.position.x-CAMOFF.x,0,cam.position.z-CAMOFF.z);
