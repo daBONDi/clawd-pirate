@@ -15,3 +15,4 @@ Neu erzeugen (Host, `uv` vorhanden):
 
 | `coins.wav` | https://opengameart.org/content/purchasing-sound-effect (Spring Spring, „Purchasing Sound Effect“; auf 24 kHz mono reduziert) | CC0 |
 | `delfine.wav`, `wal.wav`, `hai.wav`, `kraken.wav`, `schiff.wav`, `schatz.wav`, `warnschuss.wav`, `nachladen.wav` | Piper TTS wie oben | – |
+| `feind.wav`, `geklaut.wav`, `nichts.wav`, `versenkt.wav` (Gegner) | Piper TTS wie oben (piper-tts 1.4, `--length-scale 0.9`; „Clawd“ als „Klaud“ geschrieben) | – |
