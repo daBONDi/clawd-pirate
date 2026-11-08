@@ -479,6 +479,16 @@ function collide(t){
 }
 window.dbg={pos,get h(){return h},get speed(){return speed},get bumps(){return bumps},get shots(){return shots},get audio(){return ac?ac.state:'none'},get amb(){return amb?'on':'off'},get stick(){return {...stick}},get t(){return tNow},get reactUntil(){return reactUntil},get jokes(){return m.length},get sounds(){return Object.keys(sounds)},get manual(){return isManual(tNow)},get islands(){return islands.map(i=>({x:i.position.x,z:i.position.z,r:i.userData.r}))}};
 
+// ============ auto-update: phones and tablets restore old tabs for days without reloading. Ask the server for the page's ETag
+// (HEAD, HTTP cache bypassed); when it differs from the one at load, reload: at once when the tab comes back into view,
+// otherwise at the next check once nobody has played for a minute.
+{let etag=null,stale=false;
+  const check=async()=>{try{const r=await fetch(location.pathname,{method:'HEAD',cache:'no-store'});const e=r.headers.get('etag')||r.headers.get('last-modified');if(!r.ok||!e)return;if(etag===null)etag=e;else if(e!==etag)stale=true}catch(e){/* offline */}};
+  const back=()=>check().then(()=>{if(stale)location.reload()});
+  check();setInterval(()=>check().then(()=>{if(stale&&tNow-lastInput>60)location.reload()}),5*60*1000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)back()});
+  addEventListener('pageshow',e=>{if(e.persisted)back()});}
+
 // ============ Clawd on deck
 const clEl=document.getElementById('cl'),jb=document.getElementById('jb');
 const POSES=['pirate','pirate','dancing','waving','laughing','eating','flexing','cool','surprised','celebrating','coffee','fishing','telescope','singing','idea','shrug','yawning','music','star','reading','magic','ninja','superhero','king','detective','drumming','dj','photography','love'];

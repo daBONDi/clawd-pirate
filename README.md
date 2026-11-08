@@ -33,6 +33,10 @@ löst das Ereignis nach 4 s aus. `?amb=0.3` setzt die Lautstärke der
 Hintergrund-Atmosphäre (Standard 0.16, `0` schaltet sie aus), `?touch` zeigt die
 Touch-Steuerung auch am Desktop.
 
+Die Seite prüft beim Zurückkehren in den Tab und alle 5 Minuten per HEAD-Anfrage,
+ob GitHub Pages eine neue Version hat (ETag), und lädt sich dann selbst neu –
+auch auf Handys und Tablets, die alte Tabs tagelang offen halten.
+
 ## Inhalt
 
 - `clawd-pirates/` – das 3D-Spiel
