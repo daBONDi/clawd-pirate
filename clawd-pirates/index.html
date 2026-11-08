@@ -1,0 +1,604 @@
+<!doctype html><meta charset=utf-8><title>Clawd</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#8fd0f0;font-family:sans-serif}
+canvas{position:absolute;inset:0;display:block}
+#cl{position:absolute;left:0;top:0;pointer-events:none;will-change:transform}
+#jb{position:absolute;left:0;top:0;background:#fff;color:#1b1b1b;font:bold 28px/1.25 sans-serif;padding:16px 24px;border-radius:28px;width:620px;box-sizing:border-box;text-align:center;box-shadow:0 6px 0 #0003;pointer-events:none;will-change:transform;transition:background .3s}
+#jb:after{content:'';position:absolute;left:50%;bottom:-28px;margin-left:-20px;border:20px solid transparent;border-top:30px solid #fff;border-bottom:0}
+#jb.ev{background:#ffe08a}#jb.ev:after{border-top-color:#ffe08a}
+.txt{position:absolute;top:16px;left:0;right:0;text-align:center;font-size:38px;font-weight:bold;color:#ffe08a;text-shadow:0 3px 8px #000a;pointer-events:none}
+#hud{position:absolute;bottom:22px;right:24px;display:flex;gap:18px;align-items:center;pointer-events:none}
+.pill{background:#0008;color:#ffe08a;font:bold 26px sans-serif;padding:8px 18px;border-radius:30px;display:flex;align-items:center;gap:10px}
+.coin{width:24px;height:24px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#fff3a0,#e6c34a 60%,#9a7a1a);box-shadow:0 0 0 2px #7a5a10 inset}
+#ban{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(0);font:bold 64px sans-serif;color:#fff;text-shadow:0 4px 12px #000c,0 0 30px #ffb020;pointer-events:none;transition:transform .35s cubic-bezier(.2,1.6,.4,1)}
+#ban.on{transform:translate(-50%,-50%) scale(1)}
+#err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#fff;background:#123;font-size:40px}
+</style>
+<div id=hud><div class=pill id=mode>Autopilot</div><div class=pill id=ammo>Kugeln: ●●●</div><div class=pill><span class=coin></span><span id=score>Schätze: 0</span></div><div class=pill id=clock>Tag</div></div>
+<img id=cl src="../assets/clawd-pirate.svg" alt="">
+<div id=jb></div>
+<div id=ban></div>
+<div id=err>WebGL nicht verfügbar</div>
+<script type=module>
+import * as THREE from '../assets/three.module.js';
+try{
+// ============ setup
+const W=()=>innerWidth,H=()=>innerHeight;
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(1);renderer.setSize(W(),H());document.body.prepend(renderer.domElement);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x8fd0f0);
+const VIEW=18;
+const cam=new THREE.OrthographicCamera(-1,1,1,-1,-200,400);
+function fit(){const a=W()/H();cam.left=-VIEW*a/2;cam.right=VIEW*a/2;cam.top=VIEW/2;cam.bottom=-VIEW/2;cam.updateProjectionMatrix();renderer.setSize(W(),H())}
+fit();addEventListener('resize',fit);
+const CAMOFF=new THREE.Vector3(40,40,40);
+const hemi=new THREE.HemisphereLight(0xffffff,0x5a8aaa,1.0);scene.add(hemi);
+const sun=new THREE.DirectionalLight(0xfff2d0,1.25);sun.position.set(-20,40,10);scene.add(sun);
+const SUNDIR=sun.position.clone().normalize();
+const V=(x,y,z)=>new THREE.Vector3(x,y,z);
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const norm=a=>{while(a>Math.PI)a-=2*Math.PI;while(a<-Math.PI)a+=2*Math.PI;return a};
+const lerp=(a,b,f)=>a+(b-a)*f;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const C=c=>new THREE.Color(c);
+
+// ============ geometry baker: many colored parts -> one mesh (one draw call)
+const vcMat=new THREE.MeshLambertMaterial({vertexColors:true,flatShading:true});
+class Baker{
+  constructor(){this.pos=[];this.col=[]}
+  add(geo,color,p=[0,0,0],r=[0,0,0],s=[1,1,1]){
+    const m=new THREE.Matrix4().compose(V(...p),new THREE.Quaternion().setFromEuler(new THREE.Euler(...r)),V(...s));
+    return this.addM(geo,color,m);
+  }
+  addM(geo,color,m){
+    const g=geo.index?geo.toNonIndexed():geo;g.applyMatrix4(m);
+    const a=g.attributes.position.array;this.pos.push(a);
+    const c=C(color),n=a.length/3,ca=new Float32Array(n*3);
+    for(let i=0;i<n;i++){ca[i*3]=c.r;ca[i*3+1]=c.g;ca[i*3+2]=c.b}
+    this.col.push(ca);if(g!==geo)geo.dispose();return this;
+  }
+  rope(a,b,r,color,seg=4){
+    const d=new THREE.Vector3().subVectors(b,a),len=d.length();
+    const m=new THREE.Matrix4().compose(a.clone().add(b).multiplyScalar(.5),new THREE.Quaternion().setFromUnitVectors(V(0,1,0),d.normalize()),V(1,1,1));
+    return this.addM(new THREE.CylinderGeometry(r,r,len,seg),color,m);
+  }
+  build(mat=vcMat){
+    const cat=arrs=>{const n=arrs.reduce((s,a)=>s+a.length,0),o=new Float32Array(n);let k=0;for(const a of arrs){o.set(a,k);k+=a.length}return o};
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute('position',new THREE.BufferAttribute(cat(this.pos),3));
+    geo.setAttribute('color',new THREE.BufferAttribute(cat(this.col),3));
+    geo.computeVertexNormals();return new THREE.Mesh(geo,mat);
+  }
+}
+const Box=(x,y,z)=>new THREE.BoxGeometry(x,y,z),Cyl=(a,b,h,n=8)=>new THREE.CylinderGeometry(a,b,h,n),Sph=(r,a=6,b=5)=>new THREE.SphereGeometry(r,a,b),Cone=(r,h,n=6)=>new THREE.ConeGeometry(r,h,n);
+
+// ============ sea (GPU waves; same function in JS for buoyancy)
+function waveY(x,z,t){return Math.sin(x*.45+t*1.1)*.16+Math.cos(z*.38+t*1.4)*.16+Math.sin((x+z)*.2+t*.7)*.2+Math.sin(x*1.3-z*.7-t*2)*.04}
+const seaUni={t:{value:0},cDeep:{value:C(0x2a8ac0)},cShallow:{value:C(0x4fb6e4)},sunDir:{value:SUNDIR},sunCol:{value:C(0xffffff)},amb:{value:.62},sunI:{value:.55}};
+const seaMat=new THREE.ShaderMaterial({uniforms:seaUni,vertexShader:`
+uniform float t;varying float vh;varying vec3 vn;varying vec2 vw;
+float wave(vec2 p){return sin(p.x*.45+t*1.1)*.16+cos(p.y*.38+t*1.4)*.16+sin((p.x+p.y)*.2+t*.7)*.2+sin(p.x*1.3-p.y*.7-t*2.)*.04;}
+void main(){vec4 wp=modelMatrix*vec4(position,1.);vec2 w=wp.xz;float h=wave(w);float e=.35;
+ float hx=wave(w+vec2(e,0.));float hz=wave(w+vec2(0.,e));vn=normalize(vec3(h-hx,e,h-hz));vh=h;vw=w;
+ gl_Position=projectionMatrix*viewMatrix*vec4(wp.x,h,wp.z,1.);}`,fragmentShader:`
+uniform vec3 cDeep,cShallow,sunDir,sunCol;uniform float amb,sunI,t;varying float vh;varying vec3 vn;varying vec2 vw;
+void main(){vec3 n=normalize(vn);float dif=max(dot(n,sunDir),0.);
+ vec3 base=mix(cDeep,cShallow,clamp(vh*1.4+.5,0.,1.));vec3 col=base*(amb+dif*sunI*sunCol);
+ vec3 hv=normalize(sunDir+normalize(vec3(1.,1.,1.)));float spec=pow(max(dot(n,hv),0.),80.)*.35*sunI;col+=sunCol*spec;
+ float f=sin(vw.x*.9+vw.y*.5+t*.6+sin(vw.y*.8)*2.)*.5+.5;float foam=smoothstep(.93,1.,f)*smoothstep(.25,.5,vh);
+ col=mix(col,vec3(.95,1.,1.),foam*.35);gl_FragColor=vec4(col,1.);}`});
+const seaGeo=new THREE.PlaneGeometry(150,150,72,72);seaGeo.rotateX(-Math.PI/2);
+const sea=new THREE.Mesh(seaGeo,seaMat);sea.frustumCulled=false;scene.add(sea);
+
+// ============ textures
+function skullTex(bg,fg,stitch){
+  const c=document.createElement('canvas');c.width=c.height=256;const g=c.getContext('2d');
+  g.fillStyle=bg;g.fillRect(0,0,256,256);
+  if(stitch){g.strokeStyle='#d6c7a0';g.lineWidth=3;for(let y=40;y<256;y+=50){g.beginPath();g.moveTo(0,y);g.lineTo(256,y);g.stroke()}g.strokeStyle='#8a7a55';g.lineWidth=8;g.strokeRect(6,6,244,244)}
+  g.fillStyle=fg;g.beginPath();g.arc(128,108,60,0,7);g.fill();g.fillRect(98,150,60,42);
+  g.fillStyle=bg;g.beginPath();g.arc(104,106,14,0,7);g.arc(152,106,14,0,7);g.fill();
+  g.beginPath();g.moveTo(128,122);g.lineTo(119,142);g.lineTo(137,142);g.fill();
+  g.strokeStyle=fg;g.lineWidth=16;g.lineCap='round';g.beginPath();g.moveTo(60,200);g.lineTo(196,238);g.moveTo(196,200);g.lineTo(60,238);g.stroke();
+  return new THREE.CanvasTexture(c);
+}
+function gradTex(){const c=document.createElement('canvas');c.width=64;c.height=256;const g=c.getContext('2d'),gr=g.createLinearGradient(0,0,0,256);gr.addColorStop(0,'rgba(255,255,255,0)');gr.addColorStop(1,'rgba(255,255,255,.9)');g.fillStyle=gr;g.beginPath();g.moveTo(24,256);g.lineTo(40,256);g.lineTo(64,0);g.lineTo(0,0);g.fill();return new THREE.CanvasTexture(c)}
+
+// ============ the pirate ship
+const ship=new THREE.Group();scene.add(ship);
+const wood=0x5b3a1e,rope=0x3a2a1a,dark=0x2a1a0c,iron=0x222428;
+const outline=new THREE.Shape();[[-1.4,-3.5],[1.4,-3.5],[1.7,1],[0,4],[-1.7,1]].forEach(([x,y],i)=>i?outline.lineTo(x,y):outline.moveTo(x,y));outline.closePath();
+function hullGeo(depth,scale){const g=new THREE.ExtrudeGeometry(outline,{depth,bevelEnabled:false});g.rotateX(-Math.PI/2);g.scale(scale,1,scale);return g}
+{
+  const B=new Baker();
+  B.add(hullGeo(.5,.82),0x4a2a12,[0,-.4,0]);
+  B.add(hullGeo(.1,1.0),0xb33a2a,[0,0,0]);
+  B.add(hullGeo(.3,1.0),0x7a4b24,[0,.1,0]);B.add(hullGeo(.3,.995),0x6e4220,[0,.4,0]);B.add(hullGeo(.3,1.0),0x7a4b24,[0,.7,0]);
+  B.add(hullGeo(.12,1.01),0xe6c34a,[0,.55,0]);
+  B.add(hullGeo(.06,.9),0xc08a4e,[0,1.0,0]);
+  for(let z=-3;z<3.5;z+=.5)B.add(Box(2.6,.012,.03),0x9a6a38,[0,1.065,z]); // deck planks seams
+  B.add(Cyl(.1,.14,6.8),wood,[0,4.3,-.8]);B.add(Cyl(.06,.06,3.5,6),wood,[0,5.75,-.8],[Math.PI/2,0,0]);B.add(Cyl(.05,.05,3.3,6),wood,[0,2.3,-.8],[Math.PI/2,0,0]);
+  B.add(Cyl(.07,.1,4.6),wood,[0,3.35,-2.4]);B.add(Cyl(.05,.05,2,6),wood,[0,4.4,-2.4],[Math.PI/2,0,0]);
+  B.add(Cyl(.06,.09,2,6),wood,[0,1.5,-4.2],[Math.PI/2.6,0,0]);
+  B.add(Cone(.22,.7),0xe6c34a,[0,.95,-4.05],[-Math.PI/2.3,0,0]);
+  // rails
+  const rp=[[-1.26,3.15],[-1.53,-.9],[0,-3.6],[1.53,-.9],[1.26,3.15]];
+  for(let i=0;i<rp.length-1;i++){const [x1,z1]=rp[i],[x2,z2]=rp[i+1];
+    B.rope(V(x1,1.45,z1),V(x2,1.45,z2),.04,wood);B.rope(V(x1,1.25,z1),V(x2,1.25,z2),.03,wood);
+    const n=Math.max(2,Math.round(Math.hypot(x2-x1,z2-z1)/1.1));
+    for(let k=0;k<=n;k++){const f=k/n;B.rope(V(x1+(x2-x1)*f,1.06,z1+(z2-z1)*f),V(x1+(x2-x1)*f,1.48,z1+(z2-z1)*f),.045,wood)}}
+  B.rope(V(-1.26,1.45,3.15),V(1.26,1.45,3.15),.04,wood);
+  // cannons
+  for(const sd of [1,-1])for(const z of [2.3,1.2,.1]){const hx=1.4+.3*(3.5-z)/4.5;
+    B.add(Box(.06,.34,.45),dark,[sd*(hx+.02),.7,z]);B.add(Cyl(.11,.14,.7),iron,[sd*(hx+.28),.7,z],[0,0,Math.PI/2]);B.add(Sph(.15),iron,[sd*(hx-.02),.7,z]);
+    B.add(Cyl(.12,.14,.5),iron,[sd*(hx-.45),1.25,z],[0,0,Math.PI/2]);B.add(Box(.5,.2,.4),wood,[sd*(hx-.45),1.12,z]);}
+  // stern cabin
+  B.add(Box(2.1,.95,1.25),0x8a5a2b,[0,1.53,2.5]);B.add(Box(2.4,.14,1.55),0x9b2d2d,[0,2.08,2.5]);B.add(Box(2.2,.06,1.35),0x7a4b24,[0,1.04,2.5]);
+  B.add(Box(.08,.6,.08),wood,[0,1.35,1.55]);
+  for(const sd of [1,-1])B.rope(V(sd*1.0,1.06,1.78),V(sd*1.0,1.2,1.78),.03,dark);
+  // crow's nest
+  B.add(new THREE.CylinderGeometry(.5,.38,.4,8,1,true),wood,[0,5.55,-.8]);B.add(Cyl(.4,.4,.06),wood,[0,5.38,-.8]);
+  // rigging
+  for(const sd of [1,-1]){B.rope(V(0,5.4,-.8),V(sd*1.45,1.45,-.2),.02,rope);B.rope(V(0,5.4,-.8),V(sd*1.5,1.45,-1.2),.02,rope);B.rope(V(0,5.4,-.8),V(sd*1.35,1.45,1.0),.02,rope);B.rope(V(0,4.5,-2.4),V(sd*1.0,1.45,-2.0),.02,rope);
+    for(const f of [.25,.4,.55,.7]){const a=V(0,5.4,-.8).lerp(V(sd*1.45,1.45,-.2),f),b=V(0,5.4,-.8).lerp(V(sd*1.5,1.45,-1.2),f);B.rope(a,b,.015,rope)}}
+  B.rope(V(0,5.4,-.8),V(0,1.9,-4.6),.02,rope);B.rope(V(0,4.5,-2.4),V(0,1.7,-4.4),.02,rope);B.rope(V(0,5.4,-.8),V(0,2.2,3.0),.02,rope);
+  // anchor, barrels, crates, rudder
+  B.add(Box(.06,.6,.06),iron,[1.15,.85,-1.35],[0,0,.1]);B.add(Box(.4,.06,.06),iron,[1.15,1.05,-1.35],[0,0,.1]);B.add(new THREE.TorusGeometry(.2,.03,5,10,Math.PI),iron,[1.15,.57,-1.35],[0,0,Math.PI+.1]);
+  for(const [x,z] of [[-.95,.4],[-.6,.9],[-1.0,-.4]]){B.add(Cyl(.24,.24,.5),0x8a5a2b,[x,1.31,z]);B.add(new THREE.TorusGeometry(.245,.02,4,10),iron,[x,1.4,z],[Math.PI/2,0,0]);B.add(new THREE.TorusGeometry(.245,.02,4,10),iron,[x,1.22,z],[Math.PI/2,0,0])}
+  B.add(Box(.5,.5,.5),0xb8803f,[-.8,1.31,1.45],[0,.4,0]);B.add(Box(.4,.4,.4),0xa06a30,[-.5,1.27,-1.6],[0,-.3,0]);
+  B.add(Box(.1,.9,.5),dark,[0,.1,3.7]);
+  // treasure chest on deck
+  B.add(Box(.5,.3,.35),0x6b3a16,[.9,1.22,-2.6]);B.add(Cyl(.18,.18,.5,8,1,false,0,Math.PI),0xe6c34a,[.9,1.37,-2.6],[0,0,Math.PI/2]);
+  ship.add(B.build());
+}
+// dynamic ship parts
+function billowSail(w,h,seg,amt){const g=new THREE.PlaneGeometry(w,h,seg,seg);g.userData.amt=amt;return g}
+const sailGeo=billowSail(3.2,3.4,10,.4),fsailGeo=billowSail(1.9,1.9,6,.25),flagGeo=new THREE.PlaneGeometry(1.5,.9,8,2);
+const sail=new THREE.Mesh(sailGeo,new THREE.MeshLambertMaterial({map:skullTex('#f3ead2','#1b1b1b',true),side:THREE.DoubleSide}));sail.rotation.y=Math.PI/2;sail.position.set(0,4.0,-.8);ship.add(sail);
+const fsail=new THREE.Mesh(fsailGeo,new THREE.MeshLambertMaterial({color:0xf3ead2,side:THREE.DoubleSide}));fsail.rotation.y=Math.PI/2;fsail.position.set(0,3.4,-2.4);ship.add(fsail);
+const flag=new THREE.Mesh(flagGeo,new THREE.MeshLambertMaterial({map:skullTex('#111','#fff',false),side:THREE.DoubleSide}));flag.rotation.y=Math.PI/2;flag.position.set(0,6.9,-1.5);ship.add(flag);
+function animSail(mesh,t,phase){const g=mesh.geometry,q=g.attributes.position,amt=g.userData.amt,hw=g.parameters.width/2,hh=g.parameters.height/2;
+  for(let i=0;i<q.count;i++){const x=q.getX(i),y=q.getY(i);q.setZ(i,amt*(1+.1*Math.sin(t*3+phase+x*2+y))*Math.cos(x/hw*Math.PI/2)*Math.cos(y/hh*Math.PI/2))}q.needsUpdate=true;g.computeVertexNormals()}
+function animFlag(t){const q=flagGeo.attributes.position;for(let i=0;i<q.count;i++){const x=q.getX(i);q.setZ(i,.14*(x+.75)/1.5*Math.sin(x*4-t*9))}q.needsUpdate=true}
+const wheel=new THREE.Group();wheel.position.set(0,1.62,1.55);ship.add(wheel);
+{const B=new Baker();B.add(new THREE.TorusGeometry(.3,.04,5,12),0x8a5a2b);for(const a of [0,Math.PI/4,Math.PI/2,3*Math.PI/4])B.add(Box(.72,.04,.04),0x8a5a2b,[0,0,0],[0,0,a]);wheel.add(B.build())}
+const glowMat=new THREE.MeshBasicMaterial({color:0xffd45a});
+{const B=new Baker();for(const sd of [1,-1])for(const z of [2.2,2.8])B.add(Box(.04,.34,.34),0xffffff,[sd*1.06,1.6,z]);B.add(Box(1.2,.3,.04),0xffffff,[0,1.6,3.13]);
+  for(const sd of [1,-1])B.add(Box(.16,.22,.16),0xffffff,[sd*1.0,1.3,1.78]);B.add(Box(.14,.2,.14),0xffffff,[0,5.9,-.8]);ship.add(B.build(glowMat))}
+const wakeMat=new THREE.MeshBasicMaterial({map:gradTex(),transparent:true,opacity:.7,depthWrite:false});
+const wake=new THREE.Mesh(new THREE.PlaneGeometry(2.2,7),wakeMat);wake.rotation.x=-Math.PI/2;wake.position.set(0,.25,6.8);ship.add(wake);
+let bowT=0;
+
+// ============ effects pools: splash rings, puffs, sparkles
+const fx=[];
+const ringGeo=new THREE.RingGeometry(.6,1,16);ringGeo.rotateX(-Math.PI/2);
+function splash(x,z,size=1,life=.9){const m=new THREE.Mesh(ringGeo,new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.9,depthWrite:false,side:THREE.DoubleSide}));
+  m.position.set(x,.55,z);scene.add(m);fx.push({m,age:0,life,up:(a)=>{const u=a/life;m.scale.setScalar(size*(.3+2.2*u));m.material.opacity=.9*(1-u)}})}
+const puffGeo=Sph(1,6,5);
+function puff(p,color=0xdddddd,size=.4,life=1.6,vel=V(0,.6,0)){const m=new THREE.Mesh(puffGeo,new THREE.MeshLambertMaterial({color,transparent:true,opacity:.8,flatShading:true}));
+  m.position.copy(p);scene.add(m);fx.push({m,age:0,life,up:(a,dt)=>{const u=a/life;m.position.addScaledVector(vel,dt);m.scale.setScalar(size*(.5+1.8*u));m.material.opacity=.8*(1-u)}})}
+function sparkle(p){for(let i=0;i<10;i++){const m=new THREE.Mesh(Sph(.09,4,3),new THREE.MeshBasicMaterial({color:0xffe066}));m.position.copy(p);scene.add(m);
+  const v=V(rnd(-2,2),rnd(2,5),rnd(-2,2));fx.push({m,age:0,life:1.1,up:(a,dt)=>{v.y-=9*dt;m.position.addScaledVector(v,dt);m.scale.setScalar(1-a/1.1)}})}}
+function updateFx(dt){for(let i=fx.length-1;i>=0;i--){const f=fx[i];f.age+=dt;if(f.age>=f.life){scene.remove(f.m);f.m.material.dispose();fx.splice(i,1)}else f.up(f.age,dt)}}
+
+// ============ islands
+const islands=[];let lighthouse=null;
+function palmAt(B,x,z,s=1,h=2.4){B.add(Cyl(.12*s,.2*s,h,6),0x6b4a2b,[x,h/2+.4,z],[0,0,.12]);
+  for(let k=0;k<6;k++)B.add(Cone(.28*s,1.8*s,4),k%2?0x2f7a3a:0x3b9448,[x+Math.cos(k)*.5*s+.28,h+.45,z+Math.sin(k)*.5*s],[Math.sin(k)*1.2,0,-Math.cos(k)*1.2]);
+  B.add(Sph(.14,5,4),0x8a5a2b,[x+.3,h+.2,z+.2]);B.add(Sph(.14,5,4),0x8a5a2b,[x,h+.15,z-.25]);}
+function makeIsland(kind){
+  const g=new THREE.Group(),B=new Baker(),s=rnd(.8,1.7);let r=3.7*s+.6;
+  if(kind==='rock'){B.add(new THREE.DodecahedronGeometry(2.2*s,0),0x7d8187,[0,.6,0],[0,0,0],[1,.8,1]);B.add(new THREE.DodecahedronGeometry(1.2*s,0),0x93979c,[1.8*s,.2,.6*s]);B.add(new THREE.DodecahedronGeometry(.8*s,0),0x6e7276,[-1.6*s,.1,-.8*s]);r=2.6*s+.6}
+  else if(kind==='volcano'){B.add(Cyl(3.2*s,4.2*s,.9,10),0xcbb58a,[0,.15,0]);B.add(Cyl(.9*s,2.6*s,3.2*s,9),0x5a4034,[0,1.6*s+.4,0]);B.add(Cyl(.95*s,1.0*s,.3,9),0xff5a1a,[0,3.2*s+.5,0]);
+    B.add(Cyl(.6*s,.6*s,.1,9),0xffd060,[0,3.2*s+.68,0]);for(let i=0;i<5;i++){const a=i*1.3;B.add(Box(.3,.1,1.4*s),0xd43a12,[Math.cos(a)*1.6*s,1.9*s+.4,Math.sin(a)*1.6*s],[0,-a+Math.PI/2,.9])}
+    palmAt(B,2.9*s,1.2,.8,2);g.userData.volcano={top:V(0,3.2*s+.7,0),next:0};r=4.2*s+.6}
+  else if(kind==='lighthouse'){B.add(new THREE.DodecahedronGeometry(2.4*s,0),0x8a8e93,[0,.3,0],[0,0,0],[1,.5,1]);B.add(Cyl(2.2*s,3*s,.8,9),0xe8d39a,[.4,.2,.3]);
+    const th=4.5;for(let i=0;i<5;i++)B.add(Cyl(.55-i*.05,.6-i*.05,th/5,10),i%2?0xd83434:0xffffff,[0,.9+th/10+i*th/5,0]);
+    B.add(Cyl(.7,.7,.12,10),0x333,[0,.9+th+.06,0]);B.add(Cyl(.45,.45,.6,8),0x9ad8ff,[0,.9+th+.42,0]);B.add(Cone(.75,.6,10),0xd83434,[0,.9+th+1.0,0]);
+    B.add(Box(1.2,.9,1.0),0xf3ead2,[1.6*s,.65,-.8]);B.add(Box(1.4,.15,1.2),0xd83434,[1.6*s,1.15,-.8]);
+    const beam=new THREE.Mesh(new THREE.ConeGeometry(2.4,16,10,1,true),new THREE.MeshBasicMaterial({color:0xfff2a0,transparent:true,opacity:.25,depthWrite:false,side:THREE.DoubleSide}));
+    beam.geometry.rotateX(Math.PI/2);beam.geometry.translate(0,0,-8);beam.position.set(0,.9+th+.4,0);beam.rotation.x=-.08;const piv=new THREE.Group();piv.add(beam);piv.position.y=0;g.add(piv);g.userData.beam=piv;g.userData.beamMat=beam.material;r=3*s+.6}
+  else{ // palm / treasure island
+    B.add(Cyl(3*s,3.8*s,.9,10),0xe8d39a,[0,.15,0]);B.add(Cyl(2.2*s,3.0*s,.5,10),0xf0dfae,[.3*s,.75,.2]);
+    B.add(new THREE.IcosahedronGeometry(1.9*s,0),0x4c8a4a,[.3*s,.8,0],[0,0,0],[1,.6,1]);
+    for(let i=0;i<3;i++)B.add(Sph(.45*s,5,4),0x3b9448,[Math.cos(i*2.1)*1.8*s,.9,Math.sin(i*2.1)*1.8*s]);
+    B.add(new THREE.DodecahedronGeometry(.5*s,0),0x8a8e93,[-2.2*s,.8,1.2*s]);
+    const n=1+Math.floor(Math.random()*3);for(let i=0;i<n;i++){const a=Math.random()*6.28,d=rnd(1,2.4)*s;palmAt(B,Math.cos(a)*d,Math.sin(a)*d,1,rnd(2,3))}
+    if(kind==='treasure'){B.add(Box(1.4,.08,.3),0xd43a12,[-1.5*s,1.0,-1.5*s],[0,.8,0]);B.add(Box(1.4,.08,.3),0xd43a12,[-1.5*s,1.0,-1.5*s],[0,-.8,0]);
+      B.add(Box(.5,.3,.35),0x6b3a16,[1.8*s,1.1,-1.4*s]);B.add(Cyl(.18,.18,.5,8,1,false,0,Math.PI),0xe6c34a,[1.8*s,1.25,-1.4*s],[0,0,Math.PI/2])}
+  }
+  g.add(B.build());g.userData.r=r;g.userData.kind=kind;return g;
+}
+function pickKind(){const k=Math.random();if(k<.3)return 'rock';if(k<.42)return 'volcano';if(k<.52&&!lighthouse)return 'lighthouse';if(k<.68)return 'treasure';return 'palm'}
+function spawnIsland(p,hd,initial){
+  for(let tries=0;tries<20;tries++){
+    const ang=hd+(Math.random()-.5)*2.4,dist=initial?16+Math.random()*50:58+Math.random()*12;
+    const x=p.x+Math.sin(ang)*dist,z=p.z-Math.cos(ang)*dist;
+    if(islands.every(i=>Math.hypot(i.position.x-x,i.position.z-z)>14)&&Math.hypot(x-p.x,z-p.z)>12){
+      const kind=pickKind(),g=makeIsland(kind);if(kind==='lighthouse')lighthouse=g;
+      g.position.set(x,0,z);g.rotation.y=Math.random()*6;scene.add(g);islands.push(g);return}
+  }
+}
+function disposeGroup(g){scene.remove(g);g.traverse(o=>{if(o.geometry)o.geometry.dispose()})}
+
+// ============ clouds + shadows
+const clouds=[];
+{const cm=new THREE.MeshLambertMaterial({color:0xffffff,flatShading:true}),sm=new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:.08,depthWrite:false});
+ for(let i=0;i<7;i++){const B=new Baker();const n=3+Math.floor(Math.random()*3);for(let k=0;k<n;k++)B.add(Sph(rnd(.9,1.8),6,5),0xffffff,[k*1.4-n*.7,rnd(-.3,.3),rnd(-.6,.6)],[0,0,0],[1,.6,1]);
+  const c=B.build(cm);c.position.set(rnd(-50,50),rnd(11,15),rnd(-50,50));scene.add(c);
+  const sh=new THREE.Mesh(new THREE.CircleGeometry(n*.9,10),sm);sh.rotation.x=-Math.PI/2;sh.scale.set(1.4,1,.8);scene.add(sh);
+  clouds.push({c,sh,v:V(rnd(.3,.7),0,rnd(-.2,.2))})}}
+function updateClouds(p,dt){for(const o of clouds){o.c.position.addScaledVector(o.v,dt);
+  for(const ax of ['x','z']){if(o.c.position[ax]-p[ax]>60)o.c.position[ax]-=120;if(o.c.position[ax]-p[ax]<-60)o.c.position[ax]+=120}
+  o.sh.position.set(o.c.position.x+2,.62,o.c.position.z+2)}}
+
+// ============ seagulls
+const gulls=[];
+{for(let i=0;i<5;i++){const g=new THREE.Group();const B=new Baker();B.add(Sph(.16,6,4),0xffffff,[0,0,0],[0,0,0],[1,.7,1.8]);B.add(Cone(.05,.2,4),0xf0a030,[0,0,.33],[Math.PI/2,0,0]);g.add(B.build());
+  const wm=new THREE.MeshLambertMaterial({color:0xf4f4f4,side:THREE.DoubleSide});
+  const wl=new THREE.Mesh(new THREE.PlaneGeometry(.7,.25),wm);wl.geometry.translate(-.35,0,0);wl.rotation.x=-Math.PI/2;g.add(wl);
+  const wr=new THREE.Mesh(new THREE.PlaneGeometry(.7,.25),wm);wr.geometry.translate(.35,0,0);wr.rotation.x=-Math.PI/2;g.add(wr);
+  scene.add(g);gulls.push({g,wl,wr,a:rnd(0,6.28),r:rnd(5,11),h:rnd(5.5,8.5),sp:rnd(.35,.6)*(Math.random()<.5?1:-1),ph:rnd(0,6)})}}
+function updateGulls(p,t,dt){for(const o of gulls){o.a+=o.sp*dt;const x=p.x+Math.cos(o.a)*o.r,z=p.z+Math.sin(o.a)*o.r;o.g.position.set(x,o.h+Math.sin(t*1.5+o.ph)*.4,z);
+  o.g.rotation.y=-o.a+(o.sp>0?Math.PI:0);const f=Math.sin(t*9+o.ph)*.6;o.wl.rotation.y=f;o.wr.rotation.y=-f}}
+
+// ============ creatures / events
+const actors=[];
+function addActor(a){actors.push(a);return a}
+function updateActors(dt,t){for(let i=actors.length-1;i>=0;i--){const a=actors[i];a.age+=dt;if(a.update(a.age,dt,t)===false||a.age>a.life){if(a.obj)disposeGroup(a.obj);actors.splice(i,1)}}}
+function sideOffset(p,hd,side,lat,fwd){return V(p.x+Math.sin(hd)*fwd+Math.cos(hd)*lat*side,0,p.z-Math.cos(hd)*fwd+Math.sin(hd)*lat*side)}
+function dolphinMesh(){const B=new Baker();B.add(new THREE.CapsuleGeometry(.26,1.1,3,8),0x5a7d9a,[0,0,0],[Math.PI/2,0,0]);B.add(new THREE.CapsuleGeometry(.2,.5,3,8),0xa9c3d6,[0,-.12,0],[Math.PI/2,0,0]);
+  B.add(Cone(.16,.4,4),0x4a6d8a,[0,.3,-.1],[0,0,0]);B.add(Box(.6,.05,.3),0x4a6d8a,[0,0,-.95]);B.add(Cone(.08,.4,4),0x5a7d9a,[0,0,1.0],[Math.PI/2,0,0]);return B.build()}
+function eventDolphins(p,hd){const side=Math.random()<.5?1:-1;const base=sideOffset(p,hd,side,4.5,-1);const dir=V(Math.sin(hd),0,-Math.cos(hd));
+  for(let i=0;i<3;i++){const m=dolphinMesh();scene.add(m);const d0=i*.5,start=base.clone().addScaledVector(dir,-i*1.5);
+    addActor({obj:m,age:-d0,life:2.2,update:(a)=>{if(a<0){m.visible=false;return}m.visible=true;const u=a/1.9;if(u>1)return false;
+      const y=-1.2+3.2*Math.sin(Math.PI*u);m.position.copy(start).addScaledVector(dir,u*7);m.position.y=y;
+      const dy=3.2*Math.PI*Math.cos(Math.PI*u),pitch=Math.atan2(dy,7);m.quaternion.setFromUnitVectors(V(0,0,1),dir);m.rotateX(-pitch);
+      if(!m.userData.s1&&u>.05){m.userData.s1=1;splash(m.position.x,m.position.z,.8)}if(!m.userData.s2&&u>.93){m.userData.s2=1;splash(m.position.x,m.position.z,.8)}}})}
+  react('celebrating','Delfine! Arrr, die Glücksbringer der See!',5,false,'delfine')}
+function eventWhale(p,hd){const side=Math.random()<.5?1:-1;const pos=sideOffset(p,hd,side,9,6);const B=new Baker();
+  B.add(Sph(1.6,8,6),0x3c4f66,[0,0,0],[0,0,0],[1,.6,1.9]);B.add(Sph(1.2,8,6),0x9fb0c2,[0,-.5,0],[0,0,0],[1,.45,1.7]);B.add(Box(1.6,.1,.7),0x3c4f66,[0,.1,-3.3]);B.add(Box(.5,.1,1.2),0x3c4f66,[0,.1,-3.1]);
+  B.add(Sph(.08,4,3),0x000,[.6,.5,1.8]);B.add(Sph(.08,4,3),0x000,[-.6,.5,1.8]);B.add(Cone(.3,.5,4),0x3c4f66,[0,.9,-.5]);
+  const m=B.build();m.position.copy(pos);m.position.y=-3;m.rotation.y=-hd+Math.PI+side*.3;scene.add(m);let spout=0;
+  addActor({obj:m,age:0,life:12,update:(a,dt)=>{let y;if(a<3)y=lerp(-3,-.3,a/3);else if(a<8)y=-.3+Math.sin(a*2)*.08;else y=lerp(-.3,-3.5,(a-8)/4);m.position.y=y;
+    if(a>3.2&&a<5.5){spout+=dt;if(spout>.08){spout=0;puff(m.localToWorld(V(0,1.2,1.0)),0xffffff,.18,.9,V(rnd(-.5,.5),4,rnd(-.5,.5)))}}
+    if(a>2.6&&!m.userData.s){m.userData.s=1;splash(m.position.x,m.position.z,2.2,1.4)}if(a>8.2&&!m.userData.s2){m.userData.s2=1;splash(m.position.x,m.position.z,2.2,1.4)}}});
+  react('surprised','Ein Wal! Seht nur, wie groß!',5,false,'wal')}
+function eventShark(p,hd){const side=Math.random()<.5?1:-1;const start=sideOffset(p,hd,side,6,-10),dir=V(Math.sin(hd),0,-Math.cos(hd));
+  const B=new Baker();B.add(Cone(.4,1.0,3),0x58606a,[0,.35,0],[0,0,0],[.5,1,1.6]);B.add(Cone(.2,.5,3),0x58606a,[0,.2,-1.6],[0,0,0],[.5,1,1]);const m=B.build();scene.add(m);
+  m.quaternion.setFromUnitVectors(V(0,0,1),dir);
+  addActor({obj:m,age:0,life:13,update:(a,dt,t)=>{m.position.copy(start).addScaledVector(dir,a*2.2+Math.sin(a*.8)*1.5);m.position.y=-.1+Math.sin(t*3)*.05;m.position.x+=Math.cos(hd)*Math.sin(a*.9)*1.2*side;m.position.z+=Math.sin(hd)*Math.sin(a*.9)*1.2*side}});
+  react('scared','Ein Hai! Alle Mann an Deck!',5,false,'hai')}
+function eventKraken(p,hd){const side=Math.random()<.5?1:-1;const pos=sideOffset(p,hd,side,7.5,2);const root=new THREE.Group();root.position.copy(pos);root.position.y=-9;root.rotation.y=Math.random()*6;scene.add(root);
+  const segs=[];let parent=root;for(let i=0;i<8;i++){const B=new Baker();const r0=.55-i*.055,r1=.5-i*.055;B.add(Cyl(r1,r0,1.1,8),0x6a2a6e,[0,.55,0]);
+    for(let k=0;k<3;k++)B.add(Sph(.12-i*.01,5,4),0xd98ad6,[Math.cos(k*2.1+i)*r0*.95,.25+k*.3,Math.sin(k*2.1+i)*r0*.95]);
+    const s=B.build();s.position.y=i?1.05:0;parent.add(s);parent=s;segs.push(s)}
+  const B=new Baker();B.add(Sph(.25,6,5),0x8a3a8e,[0,1.1,0]);const tip=B.build();parent.add(tip);
+  addActor({obj:root,age:0,life:13,update:(a,dt,t)=>{let y;if(a<2.5)y=lerp(-9,-.2,a/2.5);else if(a<10)y=-.2;else y=lerp(-.2,-9.5,(a-10)/3);root.position.y=y;
+    for(let i=0;i<segs.length;i++){segs[i].rotation.z=Math.sin(t*2.2+i*.55)*.28+(i>3?.08*(i-3):0);segs[i].rotation.x=Math.cos(t*1.7+i*.4)*.18}
+    if(a>.3&&a<2.8&&Math.random()<.25)splash(pos.x+rnd(-1,1),pos.z+rnd(-1,1),1.4,1);if(a>10&&a<12&&Math.random()<.2)splash(pos.x+rnd(-1,1),pos.z+rnd(-1,1),1.2,1)}});
+  react('scared','KRAKEN! Haltet euch fest, Landratten!',6,false,'kraken')}
+function eventShip(p,hd){const side=Math.random()<.5?1:-1;const start=sideOffset(p,hd,side,16,34);const course=hd+Math.PI+side*rnd(-.3,.3);const dir=V(Math.sin(course),0,-Math.cos(course));
+  const g=new THREE.Group(),B=new Baker();const sc=.75;const sailCol=Math.random()<.5?0xf3ead2:0x2a2a2a;
+  B.add(hullGeo(.5,.82*sc),0x3d2b1a,[0,-.3,0]);B.add(hullGeo(.8,sc),0x6b4a2b,[0,.1,0]);B.add(hullGeo(.06,.9*sc),0xb07a45,[0,.9,0]);B.add(Cyl(.08,.1,4.5),wood,[0,3,0]);
+  B.add(Box(2.1,2.3,.08),sailCol,[0,3.4,0]);B.add(Box(1.3,1.3,.06),sailCol,[0,2.6,-1.6]);B.add(Cyl(.06,.08,3),wood,[0,2,-1.6]);B.add(Box(.9,.5,.05),sailCol==0x2a2a2a?0xd43a12:0x1b3a8a,[.45,5.3,0]);
+  B.add(Box(1.4,.7,.9),0x7a5a35,[0,1.25,1.8]);g.add(B.build());g.position.copy(start);g.rotation.y=-course;scene.add(g);
+  const a=addActor({obj:g,age:0,life:70,update:(a,dt,t)=>{g.position.addScaledVector(dir,1.5*dt);g.position.y=.1+waveY(g.position.x,g.position.z,t)*.6;g.rotation.z=Math.sin(t*1.2)*.05;g.rotation.x=Math.sin(t*.9)*.03;
+    if(a>8&&Math.hypot(g.position.x-pos.x,g.position.z-pos.z)>75)return false}});
+  a.obstacle={r:4.5,get x(){return g.position.x},get z(){return g.position.z}};
+  react('telescope','Schiff ahoi! Ein fremdes Segel am Horizont!',5,false,'schiff')}
+const chests=[];
+function spawnChest(p,hd){const pos=sideOffset(p,hd,Math.random()<.5?1:-1,rnd(0,7),rnd(26,36));const B=new Baker();B.add(Box(.8,.5,.55),0x6b3a16,[0,.25,0]);B.add(Cyl(.28,.28,.8,8,1,false,0,Math.PI),0xe6c34a,[0,.5,0],[0,0,Math.PI/2]);
+  B.add(Box(.84,.08,.6),iron,[0,.2,0]);B.add(Box(.14,.16,.06),0xe6c34a,[0,.42,.3]);const m=B.build();m.position.copy(pos);m.rotation.y=Math.random()*6;scene.add(m);chests.push({m,age:0})}
+function updateChests(p,dt,t){for(let i=chests.length-1;i>=0;i--){const c=chests[i];c.age+=dt;const m=c.m;
+  if(c.got){const u=(c.age-c.got)/1;m.position.y+=3*dt;m.rotation.y+=8*dt;m.scale.setScalar(Math.max(.01,1-u));if(u>=1){disposeGroup(m);chests.splice(i,1)}continue}
+  m.position.y=waveY(m.position.x,m.position.z,t)-.1;m.rotation.z=Math.sin(t*1.5)*.15;
+  const d=Math.hypot(m.position.x-p.x,m.position.z-p.z);
+  if(d<3.4){c.got=c.age;score++;scoreEl.textContent='Schätze: '+score;sparkle(m.position.clone().setY(1));play('coin',1);setTimeout(()=>react('celebrating','Schatz gefunden! Arrr, das Gold ist unser!',4,true,'schatz'),500);banner('Schatz!')}
+  else if(d>90){disposeGroup(m);chests.splice(i,1)}}}
+let score=0;const scoreEl=document.getElementById('score');
+const banEl=document.getElementById('ban');let banT=0;function banner(s){banEl.textContent=s;banEl.classList.add('on');banT=2.2}
+
+// ============ cannon
+let cannonCd=10,lastFire=-9,shots=0;
+// magazine: 3 quick shots, then 5 s reload; the cannons take turns (port/starboard, bow to stern)
+const AMMO=3,RELOAD=5;let ammo=AMMO,reloadUntil=-1,cannonIdx=0;
+const ammoEl=document.getElementById('ammo');
+function say(text){try{if(!('speechSynthesis' in window))return;const u=new SpeechSynthesisUtterance(text);u.lang='de-DE';u.rate=1.05;u.pitch=1.25;
+  const v=speechSynthesis.getVoices().find(x=>x.lang&&x.lang.toLowerCase().startsWith('de'));if(v)u.voice=v;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){/* no voices */}}
+function chime(){try{if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();if(ac.state==='suspended')ac.resume();const t0=ac.currentTime;
+  [[660,0],[880,.12],[1320,.24]].forEach(([f,d])=>{const o=ac.createOscillator(),g=ac.createGain();o.type='triangle';o.frequency.value=f;g.gain.setValueAtTime(.0001,t0+d);g.gain.exponentialRampToValueAtTime(.4,t0+d+.02);g.gain.exponentialRampToValueAtTime(.0001,t0+d+.35);o.connect(g).connect(ac.destination);o.start(t0+d);o.stop(t0+d+.4)})}catch(e){/* no audio */}}
+function clack(){try{if(!ac)return;const t0=ac.currentTime,o=ac.createOscillator(),g=ac.createGain();o.type='square';o.frequency.value=180;g.gain.setValueAtTime(.15,t0);g.gain.exponentialRampToValueAtTime(.0001,t0+.08);o.connect(g).connect(ac.destination);o.start(t0);o.stop(t0+.09)}catch(e){/* no audio */}}
+// cannon sound: synthesized (noise burst through a falling low-pass + a low thump), no audio file needed
+let ac=null;
+// sampled sounds (CC0 cannon from OpenGameArt, voice lines pre-rendered with Piper TTS); synth/browser TTS only as fallback
+const SND={fire:'cannon_fire.ogg',hit:'cannon_hit.ogg',coin:'coins.wav',feuer:'feuer.wav',aua:'aua.wav',nachgeladen:'nachgeladen.wav',nachladen:'nachladen.wav',treffer:'treffer.wav',arrr:'arrr.wav',
+  delfine:'delfine.wav',wal:'wal.wav',hai:'hai.wav',kraken:'kraken.wav',schiff:'schiff.wav',schatz:'schatz.wav',warnschuss:'warnschuss.wav'};
+const sounds={};let soundsLoaded=0;
+function audioCtx(){if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();if(ac.state==='suspended')ac.resume();return ac}
+function loadSounds(){try{const a=audioCtx();for(const [k,f] of Object.entries(SND))fetch('../assets/audio/'+f).then(r=>r.arrayBuffer()).then(b=>a.decodeAudioData(b)).then(buf=>{sounds[k]=buf;soundsLoaded++}).catch(()=>{})}catch(e){/* no audio */}}
+function play(name,vol=1,rate=1){const buf=sounds[name];if(!buf)return false;try{const a=audioCtx(),s=a.createBufferSource(),g=a.createGain();s.buffer=buf;s.playbackRate.value=rate;g.gain.value=vol;s.connect(g).connect(a.destination);s.start();return true}catch(e){return false}}
+function voice(name,text){if(!play(name,1.3))say(text)}
+function boom(){if(play('fire',.9,.9+Math.random()*.2))return;boomSynth()}
+function boomSynth(){try{
+  if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();if(ac.state==='suspended')ac.resume();
+  const t0=ac.currentTime,len=ac.sampleRate*.7|0,buf=ac.createBuffer(1,len,ac.sampleRate),d=buf.getChannelData(0);
+  for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.2);
+  const n=ac.createBufferSource();n.buffer=buf;const lp=ac.createBiquadFilter();lp.type='lowpass';lp.frequency.setValueAtTime(1400,t0);lp.frequency.exponentialRampToValueAtTime(90,t0+.6);
+  const ng=ac.createGain();ng.gain.setValueAtTime(1,t0);ng.gain.exponentialRampToValueAtTime(.001,t0+.7);n.connect(lp).connect(ng).connect(ac.destination);n.start(t0);
+  const o=ac.createOscillator();o.type='sine';o.frequency.setValueAtTime(120,t0);o.frequency.exponentialRampToValueAtTime(30,t0+.45);
+  const og=ac.createGain();og.gain.setValueAtTime(1.2,t0);og.gain.exponentialRampToValueAtTime(.001,t0+.55);o.connect(og).connect(ac.destination);o.start(t0);o.stop(t0+.6);
+}catch(e){/* no audio on this device */}}
+const CANNON_Z=[.1,1.2,2.3]; // bow to stern, same rows as the baked cannons
+function fireCannon(side,idx,target,quiet){const cz_=CANNON_Z[idx%3],hx=1.4+.3*(3.5-cz_)/4.5;const muzzle=ship.localToWorld(V(side*(hx+.6),.7,cz_));shots++;boom();
+  const fl=new THREE.Mesh(Sph(.5,6,5),new THREE.MeshBasicMaterial({color:0xffd050}));fl.position.copy(muzzle);scene.add(fl);fx.push({m:fl,age:0,life:.12,up:(a)=>fl.scale.setScalar(1+a*8)});
+  const out=V(Math.cos(h)*side,0,Math.sin(h)*side); // sideways, in world space
+  for(let i=0;i<6;i++)puff(muzzle.clone().add(V(rnd(-.3,.3),rnd(-.2,.3),rnd(-.3,.3))),0xcccccc,.35,1.8,out.clone().multiplyScalar(1.2).add(V(rnd(-.4,.4),.8,rnd(-.4,.4))));
+  const ball=new THREE.Mesh(Sph(.13,6,5),new THREE.MeshLambertMaterial({color:0x111}));ball.position.copy(muzzle);scene.add(ball);
+  const tgt=V(target.x+rnd(-1.5,1.5),0,target.z+rnd(-1.5,1.5)),fl2=1.3,v=tgt.clone().sub(muzzle).multiplyScalar(1/fl2);v.y=(0-muzzle.y+.5*9*fl2*fl2)/fl2;
+  const e={m:ball,age:0,life:fl2,up:(a,dt)=>{v.y-=9*dt;ball.position.addScaledVector(v,dt);
+    for(const o of obstacles()){if(Math.hypot(ball.position.x-o.x,ball.position.z-o.z)<o.r*.85&&ball.position.y<2.5){ // hit a rock, island or ship
+      e.life=-1;for(let i=0;i<7;i++)puff(ball.position.clone(),i%2?0x8a8a8a:0x5a4a3a,.35,1.2,V(rnd(-2,2),rnd(1,4),rnd(-2,2)));banner('Treffer!');play('hit',.8);setTimeout(()=>voice('treffer','Treffer!'),350);return}}
+    if(a+dt>=fl2){splash(ball.position.x,ball.position.z,1.3,1);for(let i=0;i<5;i++)puff(ball.position.clone(),0xe8f4ff,.25,.8,V(rnd(-1,1),3,rnd(-1,1)))}}};
+  fx.push(e);
+  if(!quiet)react('cool','FEUER! Arrr, das war ein Warnschuss!',4,false,'warnschuss')}
+function fireOne(t){ // space bar: the next cannon in turn; empty magazine -> reload
+  if(t<reloadUntil){clack();react('shrug','Nachladen…',1,true,'nachladen');return}
+  if(t-lastFire<.2)return;lastFire=t;
+  const side=cannonIdx%2?-1:1,idx=Math.floor(cannonIdx/2)%3;cannonIdx++;
+  const cz_=CANNON_Z[idx],tgt=V(pos.x+Math.cos(h)*side*11+Math.sin(h)*(1.2-cz_),0,pos.z+Math.sin(h)*side*11-Math.cos(h)*(1.2-cz_));
+  fireCannon(side,idx,tgt,true);
+  react('cool','Feuer!',1.5,true);voice('feuer','Feuer!');
+  if(--ammo<=0){reloadUntil=t+RELOAD}
+}
+function updateAmmo(t){
+  if(reloadUntil>0&&t>=reloadUntil){reloadUntil=-1;ammo=AMMO;chime();setTimeout(()=>voice('nachgeladen','Kapitän, wir haben nachgeladen!'),250);react('celebrating','Käpt’n, wir haben nachgeladen!',3,true)}
+  if(t<reloadUntil){const p=Math.round((1-(reloadUntil-t)/RELOAD)*10);ammoEl.textContent='Nachladen '+'█'.repeat(p)+'░'.repeat(10-p)}
+  else ammoEl.textContent='Kugeln: '+'●'.repeat(ammo)+'○'.repeat(AMMO-ammo);
+}
+
+// ============ navigation
+const PREF=Math.PI/4;let h=PREF;const pos=new THREE.Vector3();let turnRate=0;const SPEED=2.3,MAXTURN=.5;
+let speed=SPEED;
+for(let i=0;i<11;i++)spawnIsland(pos,PREF,true);
+for(let i=0;i<2;i++)spawnChest(pos,PREF);
+function obstacles(){const o=[];for(const i of islands)o.push({x:i.position.x,z:i.position.z,r:i.userData.r});for(const a of actors)if(a.obstacle)o.push(a.obstacle);return o}
+// --- manual helm: W forward, S reverse, A/D turn. Autopilot resumes after MANUAL_HOLD seconds without a key.
+const keys=new Set();let lastInput=-1e9,bumpUntil=-1,bumpDir=0,bumps=0;
+const MANUAL_HOLD=8,SPEED_MAX=3.6,SPEED_REV=-1.3,TURN=.95,HULL=2.3;
+const modeEl=document.getElementById('mode');
+addEventListener('keydown',e=>{const k=e.key.toLowerCase();if(k.length===1&&'wasd'.includes(k)){keys.add(k);lastInput=tNow;e.preventDefault()}
+  else if(k===' '){e.preventDefault();if(!e.repeat)fireOne(tNow)}
+  if(!soundsStarted){soundsStarted=true;loadSounds()}}); // first key press = user gesture: audio may start, samples get decoded
+let soundsStarted=false;
+addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
+addEventListener('blur',()=>keys.clear());
+const isManual=t=>t-lastInput<MANUAL_HOLD;
+function steer(t,dt){
+  let avoid=0,danger=0;
+  for(const o of obstacles()){
+    const dx=o.x-pos.x,dz=o.z-pos.z,d=Math.hypot(dx,dz),R=o.r+9;if(d>R)continue;
+    const ang=norm(Math.atan2(dx,-dz)-h);
+    if(Math.abs(ang)<1.7){const push=(R-d)/R;avoid+=-(ang>=0?1:-1)*push*3.1*(1.7-Math.abs(ang))/1.7;if(d<o.r+3.2)danger=1}
+  }
+  if(t<bumpUntil){ // just hit something: the ship steers itself clear, then hands the helm back
+    const err=norm(bumpDir-h),maxStep=1.3*dt,step=clamp(err,-maxStep,maxStep);
+    turnRate=step/dt;h=norm(h+step);speed=lerp(speed,1.4,dt*2);return;
+  }
+  if(isManual(t)){
+    const turn=(keys.has('d')?1:0)-(keys.has('a')?1:0);
+    const want=keys.has('w')?SPEED_MAX:keys.has('s')?SPEED_REV:0;
+    speed=lerp(speed,want,dt*(want?1.1:.7));
+    const grip=clamp(Math.abs(speed)/2.2,.3,1); // a boat barely turns while standing still
+    const step=(turn*TURN*grip+avoid*.55)*dt; // islands still nudge the helm a little
+    turnRate=step/dt;h=norm(h+step);return;
+  }
+  // autopilot
+  speed=lerp(speed,SPEED,dt*.8);
+  let target=PREF+Math.sin(t*.13)*.35+Math.sin(t*.31+1)*.15;
+  let best=null,bd=1e9;for(const c of chests){if(c.got)continue;const dx=c.m.position.x-pos.x,dz=c.m.position.z-pos.z,d=Math.hypot(dx,dz);if(d<32&&d<bd){const b=norm(Math.atan2(dx,-dz)-h);if(Math.abs(b)<1.3){best=b;bd=d}}}
+  if(best!==null)target=h+clamp(best,-.6,.6);
+  target+=avoid;
+  const err=norm(target-h),maxStep=(MAXTURN+danger*.5)*dt,step=clamp(err,-maxStep,maxStep);
+  turnRate=step/dt;h=norm(h+step);
+}
+function collide(t){
+  for(const o of obstacles()){
+    const dx=pos.x-o.x,dz=pos.z-o.z,d=Math.hypot(dx,dz),min=o.r+HULL;if(d>=min||d===0)continue;
+    const nx=dx/d,nz=dz/d;pos.x=o.x+nx*min;pos.z=o.z+nz*min; // keep the hull outside the island
+    if(t>=bumpUntil){
+      bumps++;bumpUntil=t+2.6;bumpDir=Math.atan2(nx,-nz);speed=Math.min(speed,.5);if(isManual(t))lastInput=t+2.6;
+      const bp=ship.localToWorld(V(0,.3,-3.9));splash(bp.x,bp.z,1.6,1);for(let i=0;i<5;i++)puff(bp.clone().add(V(rnd(-.5,.5),rnd(0,.6),rnd(-.5,.5))),0xe8f4ff,.3,.9,V(rnd(-1.5,1.5),3,rnd(-1.5,1.5)));
+      react('crying','Aua!',2.5,true);voice('aua','Aua!');banner('Rumms!');
+    }
+  }
+}
+window.dbg={pos,get h(){return h},get speed(){return speed},get bumps(){return bumps},get shots(){return shots},get audio(){return ac?ac.state:'none'},get t(){return tNow},get reactUntil(){return reactUntil},get jokes(){return m.length},get sounds(){return Object.keys(sounds)},get manual(){return isManual(tNow)},get islands(){return islands.map(i=>({x:i.position.x,z:i.position.z,r:i.userData.r}))}};
+
+// ============ Clawd on deck
+const clEl=document.getElementById('cl'),jb=document.getElementById('jb');
+const POSES=['pirate','pirate','dancing','waving','laughing','eating','flexing','cool','surprised','celebrating','coffee','fishing','telescope','singing','idea','shrug','yawning','music','star','reading','magic','ninja','superhero','king','detective','drumming','dj','photography','love'];
+const WALKS=['crab-walking','running'];
+[...new Set([...POSES,...WALKS,'scared','crying'])].forEach(n=>{new Image().src='../assets/clawd-'+n+'.svg'});
+let cz=1.2,tz=1.2,state='pause',stateUntil=0,cur='',reactUntil=-1;
+function setAnim(n){if(n!==cur){cur=n;clEl.src='../assets/clawd-'+n+'.svg'}}
+const m=[
+"Was ist das Lieblingsessen von Piraten? – Fisch-Stäbchen, Arrr!",
+"Warum gehen Piraten nicht zur Schule? – Sie sind schon auf See-Fahrt!",
+"Was trinkt ein Pirat am Morgen? – Kaffee mit viel Arrr-oma!",
+"Wie heißt der Lieblingsbuchstabe der Piraten? – Das Arrr!",
+"Was macht ein Pirat am Computer? – Er drückt die Enter-Taste!",
+"Warum nehmen Piraten kein Handy mit? – Sie haben Angst vorm Netz!",
+"Was sagt ein Pirat zu seinem Holzbein? – Du bist mein bester Stütz-Punkt!",
+"Wie nennt man einen Piraten ohne Schiff? – Eine Landratte mit Hut!",
+"Was ist der Lieblingssport der Piraten? – Enter-Hockey!",
+"Warum ist der Papagei so klug? – Er hat dem Käpt'n alles nachgeplappert!",
+"Was kostet ein Piratenschiff? – Einen Arrr-m und ein Bein!",
+"Wo kauft ein Pirat seine Sachen? – Im Enter-Markt!",
+"Was ist das Lieblingsinstrument der Piraten? – Die Gi-tarrr-e!",
+"Warum sind Piraten schlecht in Mathe? – Sie rechnen immer mit Kanonenkugeln!",
+"Was sagt ein Pirat beim Zahnarzt? – Arrr, einen Goldzahn bitte!",
+"Welches Tier hat ein Pirat am liebsten? – Den See-Hund!",
+"Warum tragen Piraten eine Augenklappe? – Damit sie beim Versteckspiel nicht schummeln!",
+"Was ist die Lieblingsfarbe der Piraten? – Arrr-ange!",
+"Warum hat der Pirat ein Eis gekauft? – Er wollte einen Schatz zum Schlecken!",
+"Was macht ein Pirat, wenn ihm kalt ist? – Er holt die Wärrrm-flasche!",
+"Was ist das Lieblingsspiel der Piraten? – Schiffe versenken, aber nur die von den anderen!",
+"Warum gehen Piraten nie verloren? – Sie haben einen Kompass im Kopf, Arrr!",
+"Was sagt der Pirat zum Koch? – Mehr Rumkugeln, aber ohne Rum!",
+"Wie nennt man einen schlafenden Piraten? – Einen Schatz-Schnarcher!",
+"Was ist rund, schwarz und sehr laut? – Eine Kanonenkugel beim Niesen!",
+"Warum war der Pirat traurig? – Seine Schatzkarte hatte kein X!",
+"Was ist die Lieblingsjahreszeit der Piraten? – Der Arrr-ugust!",
+"Warum macht ein Pirat keine Hausaufgaben? – Er hat sie in der Schatztruhe vergraben!",
+"Was ist ein Piraten-Picknick? – Kekse auf der Planke!",
+"Wie heißt die Katze des Piraten? – Kater Kompass!",
+"Was sagt der Papagei, wenn die Kanone schießt? – Nicht so laut, ich habe Fedarrrn!",
+"Wie heißt die Lieblingsstadt der Piraten? – Ham-Burg, wegen der Hamburger!",
+"Warum nimmt der Pirat eine Leiter mit? – Um die hohe See zu erklimmen!",
+"Was sagt der Pirat zur Welle? – Du bist mir zu hoch, Arrr!",
+"Warum lachen Piraten über Haie? – Die haben Flossen statt Enterhaken!",
+"Was ist das Lieblingsgemüse der Piraten? – Die Enter-Erbse!",
+"Was ist ein Pirat im Schwimmbad? – Ein Plansch-Räuber!",
+"Warum kann ein Pirat so gut klettern? – Er übt jeden Tag in der Takelage!",
+"Was sagt ein Pirat zu seinem Fernrohr? – Du hast den Durchblick!",
+"Welche Musik mögen Piraten? – Alles mit ordentlich Bass-Kanone!",
+"Was isst ein Pirat zum Frühstück? – Müs-Arrr-li!",
+"Warum tragen Piraten keine Hausschuhe? – Holzbeine brauchen keine!",
+"Was macht der Pirat beim Fußball? – Er entert das Tor!",
+"Wie nennt man einen sehr höflichen Piraten? – Käpt'n Bitte-und-Danke!",
+"Warum ist die Schatzkiste abgeschlossen? – Damit der Papagei nicht nascht!",
+"Was ist das Lieblingsobst der Piraten? – Die Ban-Arrr-ne!",
+"Was ruft der Pirat, wenn er die Treppe runterfällt? – Arrr, die Planke!",
+"Was hat vier Räder und ein Holzbein? – Ein Pirat auf dem Skateboard!",
+"Warum reden Piraten so laut? – Damit der Wind sie auch hört!",
+"Was ist der Lieblingstag der Piraten? – Der Schatz-Tag… äh, Samstag!",
+"Wie backen Piraten Kuchen? – Mit ganz viel Rumms!",
+"Was sagt der Pirat zur Möwe? – Nicht auf meinen Hut, bitte!",
+"Warum haben Piraten immer Gold dabei? – Silber glänzt nicht so schön!",
+"Was macht ein Pirat im Winter? – Schlittschuhlaufen auf dem Eis-Meer!",
+"Wie heißt ein Pirat, der gern kocht? – Käpt'n Kochlöffel!",
+"Warum mag der Pirat keine Suppe? – Wasser hat er schon rundherum genug!",
+"Was ist das Lieblingsdessert der Piraten? – Schatz-Pudding mit Goldstreuseln!",
+"Warum grinst der Hai? – Er hat gerade einen Piratenwitz gehört!",
+"Was tut ein Pirat, wenn das Schiff schaukelt? – Er tanzt einfach mit!",
+"Wie nennt man eine Piratenbande auf dem Schulhof? – Die Pausen-Räuber!",
+"Warum zählt der Pirat seine Münzen zweimal? – Der Papagei lacht immer dazwischen!",
+"Was sagt die Kanone zum Piraten? – Ich bin ganz schön geladen!",
+"Was ist das Lieblingsbrettspiel der Piraten? – Mensch ärgere dich nicht, wenn die Planke knarrt!",
+"Warum ist der Pirat so gut im Verstecken? – Er versteckt seit Jahren Schätze!",
+"Was ist ein Pirat mit Schnupfen? – Ein Niese-Räuber!",
+"Wie heißt der Lieblingsvogel der Piraten? – Der Kanonen-Kuckuck!",
+"Warum hat der Pirat einen Besen dabei? – Zum Deck-Schrubben, Arrr!",
+"Was tut ein müder Pirat? – Er zählt in der Koje Schätze statt Schafe!",
+"Warum fahren Piraten nicht mit dem Bus? – Da gibt es keine Planke!",
+"Was mag der Pirat an der Schule? – Die Schatzsuche im Sandkasten!",
+"Was ruft der Pirat beim Verstecken? – Ich komme, ob ihr entert oder nicht!",
+"Warum spielt der Pirat Flöte? – Die Trompete ist dem Papagei zu laut!",
+"Was ist weiß und segelt übers Meer? – Ein Gespenst im Urlaub!",
+"Was sagt der Pirat zur Schatzkiste? – Du bist mein liebster Kasten!",
+"Warum sagt man Käpt'n statt Kapitän? – Zum Rufen ist Kapitän zu lang, Arrr!",
+"Was isst der Pirat am liebsten vom Grill? – Spieße mit Enterhaken!",
+"Wie nennt man einen Piraten, der gern malt? – Käpt'n Klecks!",
+"Was ist das Motto der Piraten? – Erst entern, dann essen!",
+"Warum schläft der Papagei mit einem offenen Auge? – Er passt auf den Schatz auf!",
+"Was macht ein Pirat in der Wüste? – Er sucht das Schiff der Wüste, das Kamel!",
+"Welche Zahl mögen Piraten am meisten? – Die Arrr-cht!",
+"Warum hat der Pirat einen Regenschirm? – Falls es Kanonenkugeln regnet!",
+"Was macht ein Pirat im Zoo? – Er sucht den Schatz im Affengehege!",
+"Was sagt der Pirat zum Krokodil? – Du hast mehr Zähne als ich Goldmünzen!",
+"Wie nennt man einen Piraten mit zwei Augenklappen? – Einen, der nichts sieht, Arrr!",
+"Was trägt ein Pirat zum Schwimmen? – Eine Badehose mit Totenkopf!",
+"Warum lacht das Meer? – Weil die Wellen so kitzeln!",
+"Was macht der Pirat mit einem Fisch? – Er fragt ihn nach dem Weg zum Schatz!",
+"Warum tragen Piraten Ohrringe? – Damit sie den Wind besser hören!",
+"Was ist die Lieblingsfrucht des Papageis? – Alles, was der Pirat gerade essen wollte!",
+"Was sagt der Pirat zum Leuchtturm? – Du bist ganz schön hell, Arrr!",
+"Warum spielt der Pirat Verstecken mit der Insel? – Die Insel läuft nie weg!",
+"Was hat der Pirat im Rucksack? – Einen Ersatzhut und drei Kekse!",
+"Wie sagt ein Pirat Gute Nacht? – Arrr-geschlafen!",
+"Was trinkt der Papagei am liebsten? – Papa-Gei-Saft… äh, Wasser!",
+"Warum streiten Piraten nie mit dem Wetter? – Der Wind gewinnt immer!",
+"Was macht der Pirat an seinem Geburtstag? – Er versteckt die Geschenke wie einen Schatz!",
+"Warum hat der Pirat einen Goldzahn? – Die Zahnfee hatte nur Münzen dabei!",
+"Was ist das Lieblingstier vom Schiffskoch? – Der Tintenfisch, wegen der Suppe!",
+"Was sagt Clawd, wenn die Kinder fertig gegessen haben? – Arrr, super gemacht, Landratten!"];
+// jokes only while nobody plays: autopilot and no key for IDLE_JOKES seconds; shuffled so all 100 come around
+const IDLE_JOKES=20;let order=[],nextJoke=0,bubbleShown=true;
+function nextJokeText(){if(!order.length){order=m.map((_,i)=>i);for(let i=order.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[order[i],order[j]]=[order[j],order[i]]}}return m[order.pop()]}
+function showBubble(on){if(on!==bubbleShown){bubbleShown=on;jb.style.visibility=on?'visible':'hidden'}}
+function updateJokes(t){
+  if(t<reactUntil){showBubble(true);return}
+  if(isManual(t)||t-lastInput<IDLE_JOKES){showBubble(false);nextJoke=t+2;return}
+  if(t>=nextJoke){jb.textContent=nextJokeText();jb.classList.remove('ev');nextJoke=t+9}
+  showBubble(true);
+}
+function react(pose,text,secs,force,snd){const now=tNow;if(!force&&now<reactUntil-1)return;reactUntil=now+secs;jb.textContent=text;jb.classList.add('ev');showBubble(true);setAnim(pose);state='pause';stateUntil=now+secs+1;if(snd)voice(snd,text)}
+let tNow=0;
+function planClawd(t,dt){
+  if(t<reactUntil)return;
+  if(state==='pause'){if(t>stateUntil){tz=-1.9+Math.random()*3.1;if(Math.abs(tz-cz)<1.2)tz=cz>-.3?-1.8:1.2;state='walk';setAnim(WALKS[Math.random()*2|0])}}
+  else{const sp=(cur==='running'?1.7:.9)*dt,d=tz-cz;if(Math.abs(d)<=sp){cz=tz;state='pause';stateUntil=t+rnd(6,11);setAnim(POSES[Math.random()*POSES.length|0])}else cz+=Math.sign(d)*sp}
+}
+const v=new THREE.Vector3();
+function toScreen(local){v.copy(local);ship.localToWorld(v);v.project(cam);return [(v.x+1)/2*W(),(1-v.y)/2*H()]}
+function placeClawd(){
+  const ppu=H()/VIEW,S=4.6*ppu;const [x,y]=toScreen(V(.65,1.07,cz));const [x2]=toScreen(V(.65,1.07,cz-.5));
+  const bowRight=x2>x;let flip=1;if(state==='walk'){const goingBow=tz<cz;flip=(goingBow===bowRight)?1:-1}
+  clEl.style.width=clEl.style.height=S+'px';clEl.style.transform=`translate(${x-S/2}px,${y-S*.889}px) scaleX(${flip})`;
+  const bw=Math.min(620,W()-40);jb.style.width=bw+'px';const bx=clamp(x,bw/2+20,W()-bw/2-20),by=y-S*.889+S*.6-40;
+  jb.style.transform=`translate(${bx-bw/2}px,calc(${by}px - 100% - 22px))`;
+}
+
+// ============ day / night
+const clockEl=document.getElementById('clock');const DAY=300;
+const colDay={sky:C(0x8fd0f0),deep:C(0x2a8ac0),shallow:C(0x4fb6e4)},colNight={sky:C(0x24406a),deep:C(0x1a5a88),shallow:C(0x2a7aa8)},colDusk={sky:C(0xff9a5c),deep:C(0x4a6a8a),shallow:C(0xe09a6a)};
+const tmp=new THREE.Color();
+function updateDay(t){const ph=(t/DAY+.12)%1,el=Math.sin(ph*2*Math.PI),day=clamp((el+.2)/.5,0,1),dusk=Math.exp(-((el/.22)**2))*.8;
+  const mixc=(k)=>tmp.copy(colNight[k]).lerp(colDay[k],day).lerp(colDusk[k],dusk);
+  scene.background.copy(mixc('sky'));seaUni.cDeep.value.copy(mixc('deep'));seaUni.cShallow.value.copy(mixc('shallow'));
+  seaUni.sunCol.value.set(1,1,1).lerp(C(0xffb070),dusk);seaUni.sunI.value=lerp(.2,.55,day);seaUni.amb.value=lerp(.55,.62,day);
+  sun.intensity=lerp(.3,1.3,day);sun.color.set(0xfff2d0).lerp(C(0xff9a50),dusk);hemi.intensity=lerp(.55,1.0,day);
+  glowMat.color.set(0x7a6a3a).lerp(C(0xffd45a),1-day);if(lighthouse)lighthouse.userData.beamMat.opacity=lerp(.42,.06,day);
+  clockEl.textContent=day>.7?'Tag':day<.2?'Nacht':(Math.cos(ph*2*Math.PI)>0?'Morgen':'Abend')}
+
+// ============ events scheduler
+const params=new URLSearchParams(location.search);const T0=+params.get('t')||0;
+const EVMAP={dolphins:eventDolphins,whale:eventWhale,shark:eventShark,kraken:eventKraken,ship:eventShip};let forceEv=EVMAP[params.get('ev')]||null;
+let nextEvent=T0+(forceEv?4:14),nextChest=T0+20;const EVENTS=[eventDolphins,eventDolphins,eventWhale,eventShark,eventKraken,eventShip,eventShip];let lastEv=-1;
+function scheduler(t){if(t>nextEvent){if(forceEv){forceEv(pos,h);forceEv=null}else{let i;do{i=Math.random()*EVENTS.length|0}while(i===lastEv);lastEv=i;EVENTS[i](pos,h)}nextEvent=t+rnd(22,40)}
+  if(t>nextChest){spawnChest(pos,h);nextChest=t+rnd(18,30)}}
+
+// ============ main loop
+const clock=new THREE.Clock();let t=T0;const camPos=new THREE.Vector3();
+function frame(){
+  const dt=Math.min(clock.getDelta(),.1);t+=dt;tNow=t;
+  steer(t,dt);pos.x+=Math.sin(h)*speed*dt;pos.z-=Math.cos(h)*speed*dt;collide(t);
+  modeEl.textContent=t<bumpUntil?'Ausweichen!':isManual(t)?(keys.size?'Steuer: '+[...keys].join(' ').toUpperCase():'Steuer: W A S D'):'Autopilot';
+  for(let i=islands.length-1;i>=0;i--){const g=islands[i];if(Math.hypot(g.position.x-pos.x,g.position.z-pos.z)>90){if(g===lighthouse)lighthouse=null;disposeGroup(g);islands.splice(i,1)}}
+  while(islands.length<11)spawnIsland(pos,h,false);
+  // buoyancy
+  const th=-h,c=Math.cos(th),s=Math.sin(th);const wp=(lx,lz)=>waveY(pos.x+lx*c+lz*s,pos.z-lx*s+lz*c,t);
+  const hb=wp(0,-3.5),hs=wp(0,3.5),hp=wp(-1.5,0),hst=wp(1.5,0);
+  ship.position.set(pos.x,.15+(hb+hs+hp+hst)/4*.8,pos.z);ship.rotation.order='YXZ';
+  ship.rotation.y=th;ship.rotation.x=Math.atan2(hb-hs,7)*.8;ship.rotation.z=Math.atan2(hst-hp,3)*.8-turnRate*.4;
+  animSail(sail,t,0);animSail(fsail,t,2);animFlag(t);wheel.rotation.z+=turnRate*dt*4+Math.sin(t)*.01;
+  wakeMat.opacity=(.45+Math.sin(t*5)*.08)*clamp(Math.abs(speed)/SPEED,.15,1.3);wake.scale.y=speed<0?-1:1;bowT-=dt;if(bowT<0&&ship.rotation.x<-.02&&speed>.8){bowT=.7;const bp=ship.localToWorld(V(0,.3,-3.9));splash(bp.x,bp.z,.6,.7)}
+  sea.position.set(pos.x,0,pos.z);seaUni.t.value=t;
+  // volcano smoke + lighthouse beam
+  for(const g of islands){const vd=g.userData.volcano;if(vd&&t>vd.next){vd.next=t+.55;puff(g.localToWorld(vd.top.clone()),0x777777,.5,4.5,V(.4,1.2,.2))}if(g.userData.beam)g.userData.beam.rotation.y=t*.9}
+  // cannon at rocks
+  cannonCd-=dt;if(cannonCd<0){for(const g of islands){if(g.userData.kind!=='rock')continue;const dx=g.position.x-pos.x,dz=g.position.z-pos.z,d=Math.hypot(dx,dz);if(d>7&&d<13){const b=norm(Math.atan2(dx,-dz)-h);if(Math.abs(Math.abs(b)-Math.PI/2)<.5){fireCannon(b>0?1:-1,1,g.position,false);cannonCd=28;break}}}}
+  updateClouds(pos,dt);updateGulls(pos,t,dt);updateActors(dt,t);updateChests(pos,dt,t);updateFx(dt);scheduler(t);updateDay(t);
+  if(banT>0){banT-=dt;if(banT<=0)banEl.classList.remove('on')}
+  updateAmmo(t);updateJokes(t);
+  camPos.set(pos.x,0,pos.z).add(CAMOFF);cam.position.lerp(camPos,Math.min(1,dt*3));
+  if(cam.position.distanceToSquared(camPos)>900)cam.position.copy(camPos);
+  cam.lookAt(cam.position.x-CAMOFF.x,0,cam.position.z-CAMOFF.z);
+  planClawd(t,dt);
+  renderer.render(scene,cam);ship.updateMatrixWorld(true);cam.updateMatrixWorld(true);placeClawd();
+  requestAnimationFrame(frame);
+}
+cam.position.copy(camPos.set(pos.x,0,pos.z).add(CAMOFF));
+frame();
+}catch(e){console.error(e);const el=document.getElementById('err');el.style.display='flex';el.textContent='Fehler: '+e.message}
+</script>

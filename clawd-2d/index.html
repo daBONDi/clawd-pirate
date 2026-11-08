@@ -1,0 +1,49 @@
+<!doctype html><meta charset=utf-8><title>Clawd</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;font-family:sans-serif;background:linear-gradient(#5aa9e6 0%,#bfe3f5 55%,#1d5f8a 55%,#0b3a5c 100%)}
+svg.scene{position:absolute;inset:0;width:100%;height:100%}
+.ship{animation:bob 4s ease-in-out infinite;transform-origin:500px 520px}
+@keyframes bob{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(14px) rotate(2deg)}}
+.wave{animation:wv 6s linear infinite}.w2{animation-duration:9s;animation-direction:reverse}
+@keyframes wv{to{transform:translateX(-200px)}}
+.flag{animation:fl 1s ease-in-out infinite alternate;transform-origin:0 0}
+@keyframes fl{to{transform:skewY(8deg) scaleX(.9)}}
+.cloud{animation:cl 60s linear infinite}@keyframes cl{from{transform:translateX(-300px)}to{transform:translateX(1300px)}}
+.txt{position:absolute;top:18px;left:0;right:0;text-align:center;color:#fff;text-shadow:0 3px 8px #000a}
+h2{margin:0;font-size:40px;color:#ffe08a}
+.jb{box-sizing:border-box;position:relative;background:#fff;color:#1b1b1b;font:bold 27px/1.25 sans-serif;padding:16px 24px;border-radius:28px;width:640px;min-height:80px;display:flex;align-items:center;justify-content:center;text-align:center;box-shadow:0 6px 0 #0003}
+.jb:after{content:'';position:absolute;left:320px;bottom:-30px;border:22px solid transparent;border-top:32px solid #fff;border-bottom:0}
+.isl{animation:drift linear infinite;transform:translateX(-400px)}
+@keyframes drift{0%{transform:translateX(-400px)}100%{transform:translateX(1400px)}}
+</style>
+<svg class=scene viewBox="0 0 1000 600" preserveAspectRatio="xMidYMax slice">
+ <g fill="#fff" opacity=".9"><g class=cloud><ellipse cx="200" cy="90" rx="90" ry="28"/><ellipse cx="260" cy="75" rx="60" ry="26"/></g>
+ <g class=cloud style="animation-delay:-30s"><ellipse cx="200" cy="170" rx="70" ry="22"/><ellipse cx="240" cy="158" rx="45" ry="20"/></g></g>
+ <g class=isl style="animation-duration:90s;animation-delay:-20s"><path d="M0 395 q30-5 60-45 q20-25 45-5 q25 15 55 50Z" fill="#4c8a4a"/><ellipse cx="80" cy="398" rx="95" ry="10" fill="#e8d39a"/><rect x="108" y="330" width="4" height="40" fill="#6b4a2b"/><path d="M110 332 q-25-18-40-4 q22-4 40 4 q25-20 42-5 q-24-2-42 5Z" fill="#2f7a3a"/></g>
+ <g class=isl style="animation-duration:140s;animation-delay:-100s"><path d="M0 395 q20-40 70-48 q40 8 70 48Z" fill="#6a7f52"/><path d="M62 349 q8-14 16 0 q-8 3-16 0Z" fill="#fff"/><ellipse cx="70" cy="398" rx="85" ry="9" fill="#cdbb8a"/></g>
+ <g class=isl style="animation-duration:110s;animation-delay:-5s"><ellipse cx="50" cy="397" rx="60" ry="8" fill="#e8d39a"/><rect x="40" y="350" width="4" height="46" fill="#6b4a2b"/><path d="M42 352 q-22-16-36-3 q20-3 36 3 q22-18 38-4 q-22-1-38 4Z" fill="#2f7a3a"/><rect x="62" y="372" width="3" height="24" fill="#6b4a2b"/><path d="M63 374 q-14-10-24-2 q14-2 24 2 q14-11 25-3 q-14 0-25 3Z" fill="#2f7a3a"/></g>
+ <g class=wave fill="#2b86b8"><path id="M-400 380 q50-25 100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 V600 H-400Z"/></g>
+ <g class=ship>
+  <rect x="495" y="130" width="10" height="300" fill="#5b3a1e"/>
+  <path d="M505 150 H760 Q740 260 760 340 H505Z" fill="#f3ead2" stroke="#c9b98f" stroke-width="3"/>
+  <g transform="translate(632 245) scale(2.1) translate(-632 -245)"><circle cx="632" cy="245" r="26" fill="#1b1b1b"/><rect x="620" y="262" width="24" height="10" fill="#1b1b1b"/>
+  <circle cx="624" cy="241" r="6" fill="#f3ead2"/><circle cx="640" cy="241" r="6" fill="#f3ead2"/></g>
+  <g transform="translate(500 130)"><path class=flag d="M0 0 H80 L65 20 L80 40 H0Z" fill="#1b1b1b"/></g>
+  <foreignObject x="60" y="85" width="640" height="200"><div xmlns="http://www.w3.org/1999/xhtml" class="jb"><span id="t"></span></div></foreignObject>
+  <image id="cl" href="../assets/clawd-pirate.svg" x="140" y="-27" width="480" height="480"/>
+  <path d="M170 400 H830 Q790 520 680 530 H320 Q210 520 170 400Z" fill="#7a4b24"/>
+  <path d="M170 400 H830 V418 H170Z" fill="#9b6330"/>
+  <g fill="#e6c34a"><circle cx="300" cy="460" r="14"/><circle cx="400" cy="465" r="14"/><circle cx="500" cy="468" r="14"/><circle cx="600" cy="465" r="14"/><circle cx="700" cy="460" r="14"/></g>
+  <g fill="#3b230f"><circle cx="300" cy="460" r="8"/><circle cx="400" cy="465" r="8"/><circle cx="500" cy="468" r="8"/><circle cx="600" cy="465" r="8"/><circle cx="700" cy="460" r="8"/></g>
+ </g>
+ <g class="wave w2" fill="#1d6f9e" opacity=".95"><path d="M-400 500 q50-25 100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 t100 0 V600 H-400Z"/></g>
+</svg>
+<div class=txt><h2>Arrr! Kinder, esst schneller, ihr Landratten!</h2></div>
+<script>
+const m=["Was sagt ein Keks beim Arzt? – Ich fühle mich krümelig!","Warum können Geister so schlecht lügen? – Man sieht sofort durch sie hindurch!","Was ist grün und klopft an die Tür? – Ein Klopfsalat!","Treffen sich zwei Magnete. Sagt der eine: Was soll ich heute anziehen?","Was macht ein Pirat am Computer? – Er drückt die Enter-Taste!","Warum nehmen Fische kein Handy? – Weil sie Angst vorm Netz haben!","Was ist der Lieblingssport von Kühen? – Muh-Tainbike!","Wie nennt man einen Bumerang, der nicht zurückkommt? – Stock!","Was sagt die große Tomate zur kleinen? – Komm, Ketchup!","Warum ist das Mathebuch traurig? – Es hat so viele Probleme!","Was ist gelb und schießt um die Ecke? – Eine Bananenkanone!","Was sagt der Teddy, wenn er nichts mehr essen kann? – Danke, ich bin schon gestopft!"];
+let k=-1;function nx(){t.textContent=m[++k%m.length]}nx();setInterval(nx,8000);
+
+const an=['pirate','dancing','waving','laughing','eating','flexing','cool','surprised','celebrating','coffee','fishing','telescope'];
+an.forEach(n=>{new Image().src='../assets/clawd-'+n+'.svg'});
+let ai=0;setInterval(()=>{ai=(ai+1)%an.length;cl.setAttribute('href','../assets/clawd-'+an[ai]+'.svg')},10000);
+</script>
