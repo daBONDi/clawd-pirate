@@ -8,6 +8,7 @@ canvas{position:absolute;inset:0;display:block}
 #jb.ev{background:#ffe08a}#jb.ev:after{border-top-color:#ffe08a}
 .txt{position:absolute;top:16px;left:0;right:0;text-align:center;font-size:38px;font-weight:bold;color:#ffe08a;text-shadow:0 3px 8px #000a;pointer-events:none}
 #hud{position:absolute;bottom:22px;right:24px;display:flex;gap:18px;align-items:center;pointer-events:none}
+#mute{pointer-events:auto;cursor:pointer;min-width:34px;justify-content:center}#mute:active{background:#000b}
 .pill{background:#0008;color:#ffe08a;font:bold 26px sans-serif;padding:8px 18px;border-radius:30px;display:flex;align-items:center;gap:10px}
 .coin{width:24px;height:24px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#fff3a0,#e6c34a 60%,#9a7a1a);box-shadow:0 0 0 2px #7a5a10 inset}
 #ban{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(0);font:bold 64px sans-serif;color:#fff;text-shadow:0 4px 12px #000c,0 0 30px #ffb020;pointer-events:none;transition:transform .35s cubic-bezier(.2,1.6,.4,1)}
@@ -28,7 +29,7 @@ body.touch #ban{font-size:44px}
 @media (max-height:420px){#stick{width:110px;height:110px}#knob{width:50px;height:50px;margin:-25px 0 0 -25px}#fire{width:88px;height:88px;font-size:17px}}
 @media (max-width:600px){#stick{width:120px;height:120px}#knob{width:54px;height:54px;margin:-27px 0 0 -27px}#fire{width:96px;height:96px;font-size:18px}body.touch .pill{font-size:13px;padding:4px 9px}body.touch #jb{font-size:16px}}
 </style>
-<div id=hud><div class=pill id=mode>Autopilot</div><div class=pill id=ammo>Kugeln: ●●●</div><div class=pill><span class=coin></span><span id=score>Schätze: 0</span></div><div class=pill id=clock>Tag</div></div>
+<div id=hud><div class=pill id=mode>Autopilot</div><div class=pill id=ammo>Kugeln: ●●●</div><div class=pill><span class=coin></span><span id=score>Schätze: 0</span></div><div class=pill id=clock>Tag</div><div class=pill id=mute title="Ton aus (M)">🔊</div></div>
 <img id=cl src="../assets/clawd-pirate.svg" alt="">
 <div id=jb></div>
 <div id=ban></div>
@@ -318,11 +319,11 @@ let cannonCd=10,lastFire=-9,shots=0;
 // magazine: 3 quick shots, then 5 s reload; the cannons take turns (port/starboard, bow to stern)
 const AMMO=3,RELOAD=5;let ammo=AMMO,reloadUntil=-1,cannonIdx=0;
 const ammoEl=document.getElementById('ammo');
-function say(text){try{if(!('speechSynthesis' in window))return;const u=new SpeechSynthesisUtterance(text);u.lang='de-DE';u.rate=1.05;u.pitch=1.25;
+function say(text){try{if(muted||!('speechSynthesis' in window))return;const u=new SpeechSynthesisUtterance(text);u.lang='de-DE';u.rate=1.05;u.pitch=1.25;
   const v=speechSynthesis.getVoices().find(x=>x.lang&&x.lang.toLowerCase().startsWith('de'));if(v)u.voice=v;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){/* no voices */}}
 function chime(){try{if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();if(ac.state==='suspended')ac.resume();const t0=ac.currentTime;
-  [[660,0],[880,.12],[1320,.24]].forEach(([f,d])=>{const o=ac.createOscillator(),g=ac.createGain();o.type='triangle';o.frequency.value=f;g.gain.setValueAtTime(.0001,t0+d);g.gain.exponentialRampToValueAtTime(.4,t0+d+.02);g.gain.exponentialRampToValueAtTime(.0001,t0+d+.35);o.connect(g).connect(ac.destination);o.start(t0+d);o.stop(t0+d+.4)})}catch(e){/* no audio */}}
-function clack(){try{if(!ac)return;const t0=ac.currentTime,o=ac.createOscillator(),g=ac.createGain();o.type='square';o.frequency.value=180;g.gain.setValueAtTime(.15,t0);g.gain.exponentialRampToValueAtTime(.0001,t0+.08);o.connect(g).connect(ac.destination);o.start(t0);o.stop(t0+.09)}catch(e){/* no audio */}}
+  [[660,0],[880,.12],[1320,.24]].forEach(([f,d])=>{const o=ac.createOscillator(),g=ac.createGain();o.type='triangle';o.frequency.value=f;g.gain.setValueAtTime(.0001,t0+d);g.gain.exponentialRampToValueAtTime(.4,t0+d+.02);g.gain.exponentialRampToValueAtTime(.0001,t0+d+.35);o.connect(g).connect(out());o.start(t0+d);o.stop(t0+d+.4)})}catch(e){/* no audio */}}
+function clack(){try{if(!ac)return;const t0=ac.currentTime,o=ac.createOscillator(),g=ac.createGain();o.type='square';o.frequency.value=180;g.gain.setValueAtTime(.15,t0);g.gain.exponentialRampToValueAtTime(.0001,t0+.08);o.connect(g).connect(out());o.start(t0);o.stop(t0+.09)}catch(e){/* no audio */}}
 // cannon sound: synthesized (noise burst through a falling low-pass + a low thump), no audio file needed
 let ac=null;
 // sampled sounds (CC0 cannon from OpenGameArt, voice lines pre-rendered with Piper TTS); synth/browser TTS only as fallback
@@ -330,8 +331,16 @@ const SND={fire:'cannon_fire.ogg',hit:'cannon_hit.ogg',coin:'coins.wav',feuer:'f
   delfine:'delfine.wav',wal:'wal.wav',hai:'hai.wav',kraken:'kraken.wav',schiff:'schiff.wav',schatz:'schatz.wav',warnschuss:'warnschuss.wav'};
 const sounds={};let soundsLoaded=0;
 function audioCtx(){if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();if(ac.state==='suspended')ac.resume();return ac}
+// master volume: every sound (samples, synth, ambience) goes through one gain, so the mute button / M key silences all at once. Remembered in localStorage.
+let muted=false;try{muted=localStorage.getItem('clawd-mute')==='1'}catch(e){/* private mode */}
+let masterOut=null;function out(){const a=audioCtx();if(!masterOut){masterOut=a.createGain();masterOut.gain.value=muted?0:1;masterOut.connect(a.destination)}return masterOut}
+const muteEl=document.getElementById('mute');
+function showMute(){muteEl.textContent=muted?'🔇':'🔊';muteEl.title=muted?'Ton an (M)':'Ton aus (M)'}
+function setMute(m){muted=m;try{localStorage.setItem('clawd-mute',m?'1':'0')}catch(e){/* private mode */}
+  try{out().gain.setTargetAtTime(m?0:1,ac.currentTime,.03)}catch(e){/* no audio */}if(m&&'speechSynthesis' in window)try{speechSynthesis.cancel()}catch(e){/* no tts */}showMute()}
+showMute();muteEl.addEventListener('pointerdown',e=>{e.preventDefault();setMute(!muted)});
 function loadSounds(){try{const a=audioCtx();for(const [k,f] of Object.entries(SND))fetch('../assets/audio/'+f).then(r=>r.arrayBuffer()).then(b=>a.decodeAudioData(b)).then(buf=>{sounds[k]=buf;soundsLoaded++}).catch(()=>{})}catch(e){/* no audio */}}
-function play(name,vol=1,rate=1){const buf=sounds[name];if(!buf)return false;try{const a=audioCtx(),s=a.createBufferSource(),g=a.createGain();s.buffer=buf;s.playbackRate.value=rate;g.gain.value=vol;s.connect(g).connect(a.destination);s.start();return true}catch(e){return false}}
+function play(name,vol=1,rate=1){const buf=sounds[name];if(!buf)return false;try{const a=audioCtx(),s=a.createBufferSource(),g=a.createGain();s.buffer=buf;s.playbackRate.value=rate;g.gain.value=vol;s.connect(g).connect(out());s.start();return true}catch(e){return false}}
 function voice(name,text){if(!play(name,1.3))say(text)}
 loadSounds(); // decode right away (needs no gesture), so the first shot/event already uses the samples
 
@@ -340,7 +349,7 @@ loadSounds(); // decode right away (needs no gesture), so the first shot/event a
 const AMB_VOL=(()=>{const v=new URLSearchParams(location.search).get('amb');return v===null?.16:clamp(+v||0,0,1)})();
 let amb=null,dayLevel=1;
 const CHORDS=[[110,164.8,220,261.6],[98,146.8,196,246.9],[87.3,130.8,174.6,220],[82.4,123.5,164.8,196],[110,164.8,220,261.6],[130.8,196,261.6,329.6]]; // Am G F E Am C
-function startAmbient(){if(amb||!AMB_VOL)return;try{const a=audioCtx();const master=a.createGain();master.gain.value=0;master.connect(a.destination);
+function startAmbient(){if(amb||!AMB_VOL)return;try{const a=audioCtx();const master=a.createGain();master.gain.value=0;master.connect(out());
   // waves: brown noise, low-passed, two slow LFOs on level and filter so the sea breathes
   const len=a.sampleRate*5|0,buf=a.createBuffer(1,len,a.sampleRate),d=buf.getChannelData(0);let last=0;for(let i=0;i<len;i++){last=(last+.02*(Math.random()*2-1))/1.02;d[i]=last*3.5}
   for(let i=0;i<2000;i++){const f=i/2000;d[i]*=f;d[len-1-i]*=f} // seamless loop
@@ -373,9 +382,9 @@ function boomSynth(){try{
   const t0=ac.currentTime,len=ac.sampleRate*.7|0,buf=ac.createBuffer(1,len,ac.sampleRate),d=buf.getChannelData(0);
   for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.2);
   const n=ac.createBufferSource();n.buffer=buf;const lp=ac.createBiquadFilter();lp.type='lowpass';lp.frequency.setValueAtTime(1400,t0);lp.frequency.exponentialRampToValueAtTime(90,t0+.6);
-  const ng=ac.createGain();ng.gain.setValueAtTime(1,t0);ng.gain.exponentialRampToValueAtTime(.001,t0+.7);n.connect(lp).connect(ng).connect(ac.destination);n.start(t0);
+  const ng=ac.createGain();ng.gain.setValueAtTime(1,t0);ng.gain.exponentialRampToValueAtTime(.001,t0+.7);n.connect(lp).connect(ng).connect(out());n.start(t0);
   const o=ac.createOscillator();o.type='sine';o.frequency.setValueAtTime(120,t0);o.frequency.exponentialRampToValueAtTime(30,t0+.45);
-  const og=ac.createGain();og.gain.setValueAtTime(1.2,t0);og.gain.exponentialRampToValueAtTime(.001,t0+.55);o.connect(og).connect(ac.destination);o.start(t0);o.stop(t0+.6);
+  const og=ac.createGain();og.gain.setValueAtTime(1.2,t0);og.gain.exponentialRampToValueAtTime(.001,t0+.55);o.connect(og).connect(out());o.start(t0);o.stop(t0+.6);
 }catch(e){/* no audio on this device */}}
 const CANNON_Z=[.1,1.2,2.3]; // bow to stern, same rows as the baked cannons
 function fireCannon(side,idx,target,quiet){const cz_=CANNON_Z[idx%3],hx=1.4+.3*(3.5-cz_)/4.5;const muzzle=ship.localToWorld(V(side*(hx+.6),.7,cz_));shots++;boom();
@@ -417,6 +426,7 @@ const MANUAL_HOLD=8,SPEED_MAX=3.6,SPEED_REV=-1.3,TURN=.95,HULL=2.3;
 const modeEl=document.getElementById('mode');
 addEventListener('keydown',e=>{const k=e.key.toLowerCase();if(k.length===1&&'wasd'.includes(k)){keys.add(k);lastInput=tNow;e.preventDefault()}
   else if(k===' '){e.preventDefault();if(!e.repeat)fireOne(tNow)}
+  else if(k==='m'&&!e.repeat)setMute(!muted);
   audioCtx()}); // any key press is a user gesture: lets the (already decoded) samples play
 for(const ev of ['pointerdown','touchstart'])addEventListener(ev,()=>{try{audioCtx()}catch(e){/* no audio */}});
 // --- touch: virtual stick (left) steers like W/S/A/D but analog, big button (right) fires. Shown on coarse pointers or the first touch.
@@ -477,7 +487,7 @@ function collide(t){
     }
   }
 }
-window.dbg={pos,get h(){return h},get speed(){return speed},get bumps(){return bumps},get shots(){return shots},get audio(){return ac?ac.state:'none'},get amb(){return amb?'on':'off'},get stick(){return {...stick}},get t(){return tNow},get reactUntil(){return reactUntil},get jokes(){return m.length},get sounds(){return Object.keys(sounds)},get manual(){return isManual(tNow)},get islands(){return islands.map(i=>({x:i.position.x,z:i.position.z,r:i.userData.r}))}};
+window.dbg={pos,get h(){return h},get speed(){return speed},get bumps(){return bumps},get shots(){return shots},get audio(){return ac?ac.state:'none'},get amb(){return amb?'on':'off'},get muted(){return muted},get gain(){return masterOut?masterOut.gain.value:null},get stick(){return {...stick}},get t(){return tNow},get reactUntil(){return reactUntil},get jokes(){return m.length},get sounds(){return Object.keys(sounds)},get manual(){return isManual(tNow)},get islands(){return islands.map(i=>({x:i.position.x,z:i.position.z,r:i.userData.r}))}};
 
 // ============ auto-update: phones and tablets restore old tabs for days without reloading. Ask the server for the page's ETag
 // (HEAD, HTTP cache bypassed); when it differs from the one at load, reload: at once when the tab comes back into view,

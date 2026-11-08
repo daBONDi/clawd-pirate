@@ -13,6 +13,7 @@ Familien-Fernseher, läuft aber in jedem Browser.
 | `W` / `S` | vorwärts / rückwärts |
 | `A` / `D` | links / rechts (bezogen auf das Schiff) |
 | `Leertaste` | nächste Kanone feuern – 3 Schuss, dann 5 s nachladen |
+| `M` oder 🔊-Knopf | Ton aus / an (wird im Browser gemerkt) |
 
 Am Handy oder Tablet erscheinen Touch-Bedienelemente: links ein Joystick
 (oben/unten Fahrt, links/rechts Ruder), rechts der Feuerknopf. Im Hochformat
