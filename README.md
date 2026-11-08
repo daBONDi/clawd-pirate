@@ -24,12 +24,19 @@ Schatzkisten ein und Clawd erzählt Piratenwitze. Unterwegs: Delfine, ein Wal,
 ein Hai, der Kraken, fremde Segler, Vulkane, Leuchttürme, Tag und Nacht.
 Rammt man eine Insel, sagt Clawd „Aua!“ und das Schiff dreht selbst frei.
 
+**Gegner:** Ab und zu taucht ein rotes Schiff mit einem blauen, bösen
+Clawd-Doppelgänger auf. Es umkreist dich und schießt. Jeder Treffer kostet ein
+Herz (drei Herzen oben rechts); beim dritten Treffer klaut der Gegner einen
+Schatz und die Herzen sind wieder voll. Triffst du den Gegner zweimal, sinkt er
+und lässt seinen eigenen Schatz und alles Geklaute als Kisten zurück. Jede
+eingesammelte Kiste gibt ein Herz zurück. Im Autopilot wehrt sich Clawd selbst.
+
 Audio startet nach dem ersten Tastendruck bzw. Tippen (Browser-Regel). Im
 Hintergrund läuft leise eine synthetisierte Meeres-Atmosphäre: Wellenrauschen,
 sanfte Akkorde und tagsüber gelegentlich Möwenschreie – alles per Web Audio
 erzeugt, keine Dateien.
 
-Zum Testen: `?t=150` startet in der Nacht, `?ev=kraken|whale|dolphins|shark|ship`
+Zum Testen: `?t=150` startet in der Nacht, `?ev=kraken|whale|dolphins|shark|ship|enemy`
 löst das Ereignis nach 4 s aus. `?amb=0.3` setzt die Lautstärke der
 Hintergrund-Atmosphäre (Standard 0.16, `0` schaltet sie aus), `?touch` zeigt die
 Touch-Steuerung auch am Desktop.
